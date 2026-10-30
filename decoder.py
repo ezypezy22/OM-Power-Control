@@ -26,6 +26,10 @@ def packets(path,host=None,port=10001):
         if (host is None or src==host) and sp==port and payload:
             yield ((hi<<32)|lo)*res,(src,sp,dst,dp),seq,payload
 
+ALERT_NAMES={1:'Output power is too high',2:'Reflected power is too high',3:'Input power is too high',4:'Plate current is too high',5:'Plate voltage is low',6:'Screen current is too high',7:'Screen voltage is low',8:'Grid current is too high',9:'Grid voltage is low',10:'Heating voltage is not in limit',11:'SWR is too high',12:'Gain is low',13:'PA temperature is high',14:'Network voltage is low',15:'Blower is not rotating'}
+# Fixed-text amplifier fault messages: token -> (kind, text).
+FAULT_TOKENS={'HF':('hard_fault','Hard fault: plate-current limit exceeded. Reset it on the amplifier; this app does not send a reset.'),'HVF':('hv_fault','High-voltage fault: residual high voltage on the plate. It cannot be reset remotely; switch the amplifier off and on manually.'),'FERROR':('soft_start','Soft-start error: the amplifier could not be turned on.')}
+
 class Decoder:
     def __init__(self):
         self.tokens=[];self.measurement_revision=0;self.field_revisions={};self.buffer=b'';self.state={ 'status':'Unknown','transmitting':False,'forward':None,'reflected':None,'swr':None }
@@ -70,8 +74,9 @@ class Decoder:
                     # ST1000 was observed with the TCP interface alive and the
                     # operator confirming the PA was off (firmware 3.21).
                     self.state['status']=('Operate' if code[1:]=='110' else 'Standby') if code[0] in '12' and code[1:] in ('100','110') else 'Off' if code in ('1000','2000') else 'Unknown'
-                    self.state.pop('countdown',None)
+                    self.state.pop('countdown',None);self.state.pop('cooling_temp_c',None)
                 if token=='AUTO':
+                    self.state.pop('load_pct',None);self.state.pop('tune_pct',None)
                     self._last_plate_current=None;self._saved_tune_release=False;self._tune_save_seen=False
                     self.state.update(autotune_phase='entered',autotune_message='Automatic tuning selected',autotune_saved=False,autotune_aborted=False,autotune_stop_reported=False,autotune_abort_origin=None,autotune_defaults=False,autotune_stopped_saved=False)
                 elif token=='AUTOESC':self.state.update(autotune_phase='cancelled',autotune_message='Automatic tuning exited',autotune_saved=False)
@@ -96,9 +101,13 @@ class Decoder:
                 elif re.fullmatch(r'(LO|TU|OT)-?\d+',token):
                     # Raw positions only; engineering-unit conversion is not yet validated.
                     prefix=token[:2];self.state[{'LO':'autotune_load_raw','TU':'autotune_tune_raw','OT':'autotune_offset_raw'}[prefix]]=int(token[2:])
-                if token in ('OPERATE','STBY','PAOFF','PAON'):self.state['status']={'OPERATE':'Operate','STBY':'Standby','PAOFF':'Off','PAON':'On'}[token];self.state.pop('countdown',None)
-                elif token=='COON':self.state['status']='Cooling down'
-                elif re.fullmatch(r'(WA|CO)\d+',token):self.state.update(status='Warming up' if token[:2]=='WA' else 'Cooling down',countdown=int(token[2:]))
+                    # Protocol document: LO/TU are 1/30 of a percent of capacitor travel (LO1890 = 63 %).
+                    if prefix in ('LO','TU'):self.state[{'LO':'load_pct','TU':'tune_pct'}[prefix]]=int(token[2:])/30
+                if token in ('OPERATE','STBY','PAOFF','PAON'):self.state['status']={'OPERATE':'Operate','STBY':'Standby','PAOFF':'Off','PAON':'On'}[token];self.state.pop('countdown',None);self.state.pop('cooling_temp_c',None)
+                elif token=='COON':self.state['status']='Cooling down';self.state.pop('cooling_temp_c',None)
+                elif re.fullmatch(r'CT\d+',token):self.state.update(status='Cooling down',cooling_temp_c=int(token[2:]));self.state.pop('countdown',None)
+                elif token in FAULT_TOKENS or re.fullmatch(r'(WG|FA)\d+',token):self.set_alert(token)
+                elif re.fullmatch(r'(WA|CO)\d+',token):self.state.pop('cooling_temp_c',None);self.state.update(status='Warming up' if token[:2]=='WA' else 'Cooling down',countdown=int(token[2:]))
                 elif token in ('PTTON','PTTOFF'):
                     if token=='PTTOFF':self.confirm_rf_idle('ptt-off-message')
                     else:
@@ -126,6 +135,13 @@ class Decoder:
                 self.state['last_status']=token
             updates.append(dict(self.state))
         return updates
+
+    def set_alert(self,token):
+        if token in FAULT_TOKENS:kind,text=FAULT_TOKENS[token];code=None
+        else:
+            kind='warning' if token[:2]=='WG' else 'limit';code=int(token[2:])
+            text=('Warning' if kind=='warning' else 'Second limit exceeded')+': '+ALERT_NAMES.get(code,'alert '+str(code))
+        self.state['alert']={'kind':kind,'code':code,'text':text};self.mark('alert')
 
     def mark(self,key):self.field_revisions[key]=self.field_revisions.get(key,0)+1
 

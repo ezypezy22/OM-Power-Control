@@ -77,3 +77,31 @@ for(const [key,value,max] of [['reflected',250,500],['input',50,100],['plate_a',
  assert.equal(secondaryMeter({connection:'Connected',[key]:null},key).value,null);
 }
 console.log('Selectable secondary-meter ranges and unavailable states pass');
+{
+ const {alertPresentation:a}=require('./presentation.js');
+ const hard={kind:'hard_fault',code:null,text:'Hard fault: plate-current limit exceeded.'};
+ assert.equal(p({...live,status:'Operate',alert:hard}).kind,'fault');
+ assert.equal(p({...live,status:'Operate',alert:{kind:'hv_fault',text:'HV'}}).title,'High-voltage fault');
+ assert.equal(p({connection:'Disconnected',alert:hard}).title,'Disconnected');
+ assert.equal(p({...live,status:'Operate',alert:{kind:'warning',code:1,text:'w'}}).kind,'operate');
+ assert.match(p({...live,status:'Cooling down',cooling_temp_c:52}).detail,/52 °C/);
+ assert.match(p({...live,status:'Cooling down',cooling_temp_c:52,countdown:30}).detail,/0:30 remaining/);
+ assert.equal(c({...live,status:'Operate',alert:hard}).toggle.disabled,true);
+ assert.match(c({...live,status:'Operate',alert:hard}).reason,/fault active/i);
+ assert.equal(c({...live,status:'Operate',age_seconds:0,alert:{kind:'warning',code:1,text:'w'}}).toggle.disabled,false);
+ assert.equal(a({alert:hard}).visible,false);
+ assert.deepEqual(a({alert:{kind:'limit',text:'Second limit exceeded: SWR is too high'}}),{visible:true,kind:'limit',text:'Second limit exceeded: SWR is too high'});
+ assert.equal(a({}).visible,false);
+ console.log('Alert presentation checks passed');
+{
+ const {autotunePresentation:t}=require('./presentation.js');
+ const base={...live,age_seconds:0,settings:{model:'OM-3501A'},autotune_phase:'tuning',autotune_age_seconds:1,load_pct:69.7667,tune_pct:19.9333};
+ assert.equal(t(base).positions,'Capacitor positions · Load 69.8 % · Tune 19.9 %');
+ assert.equal(t({...base,tune_pct:undefined}).positions,'Capacitor positions · Load 69.8 %');
+ assert.equal(t({...base,load_pct:undefined,tune_pct:undefined}).positions,'');
+ assert.equal(t({...base,autotune_phase:'idle'}).positions,'');
+ assert.equal(t({...base,autotune_age_seconds:20}).positions,'');
+ assert.equal(t({...base,connection:'Disconnected'}).positions,'');
+ console.log('Capacitor position presentation checks passed');
+}
+}

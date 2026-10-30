@@ -4,11 +4,23 @@ from pathlib import Path
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 from decoder import Decoder
 SLOW_FIELDS=('plate_a','plate_v','screen_v','heater_a_v','heater_b_v','mains_v','temperature_c','grid_a_v','grid_b_v')
+# Seconds an amplifier alert stays visible after it was last received (None: until reconnect).
+# The amplifier sends no all-clear: HF repeats every second while the fault persists.
+ALERT_TTL={'warning':30,'limit':30,'hard_fault':5,'hv_fault':None,'soft_start':60}
+FAULT_KINDS=('hard_fault','hv_fault')
 EXTRA_FIELDS=(*SLOW_FIELDS,'screen_ma','frequency_khz')
 from controls import Controls
 import settings
 from collections import deque
 from session_protocol import amplifier_session
+
+def alert_age(state,now):
+ """Return the active alert and seconds since it was last received, or (None, None) once expired."""
+ alert=state.get('alert')
+ if not alert:return None,None
+ age=now-state.get('_field_times',{}).get('alert',now)
+ ttl=ALERT_TTL.get(alert.get('kind'),30)
+ return (None,None) if ttl is not None and age>ttl else (alert,round(age,1))
 
 def readiness_requirement(step,state):
  """Require the exact acknowledged state at each authorized no-RF step."""
@@ -59,6 +71,7 @@ class Monitor:
   for key in EXTRA_FIELDS:
    limit=12 if key=='frequency_khz' else 3
    if s['connection']!='Connected' or now-field_times.get(key,0)>limit:s[key]=None
+  s['alert'],s['alert_age_seconds']=alert_age({**s,'_field_times':field_times},now)
   s['grid_v']=s['grid_a_v']-s['grid_b_v'] if s.get('grid_a_v') is not None and s.get('grid_b_v') is not None else None
   if s.get('forward') is None or s.get('input') is None:s['gain_db']=None
   return s
@@ -125,10 +138,14 @@ class Monitor:
       if expected_mode!=('Standby' if self.mode_test_sent==0 else 'Operate'):raise ValueError('Mode test requires Standby to Operate, then Operate to Standby')
     if self.settings.get('model','OM-3501A')!='OM-3501A':raise ValueError('Monitoring only: controls are unverified for this model')
     duplicate=key in self.controls.seen if isinstance(key,str) else False
-    self.controls.request(action,key,self.state,expected_mode)
+    self.controls.request(action,key,self.control_state(),expected_mode)
    except ValueError as exc:self.trace_command('rejected',pending,str(exc));raise
    if self.controls.pending and not duplicate:self.controls.pending['source']=pending['source']
    self.trace_command('duplicate ignored' if duplicate else 'queued',pending,self.controls.message)
+ def control_state(self):
+  """State handed to Controls: adds fault_active so queued commands are refused during a hard fault."""
+  alert,_=alert_age(self.state,time.monotonic())
+  return {**self.state,'fault_active':bool(alert and alert['kind'] in FAULT_KINDS)}
  def disconnect(self):
   with self.lock:
    self.stop.set()
@@ -171,7 +188,7 @@ class Monitor:
      with self.lock:
       previous=self.controls.pending;self.controls.tick()
       if previous and self.controls.pending is None:self.trace_command('uncertain',previous,self.controls.message)
-      previous=self.controls.pending;command=None if self.read_only else self.controls.take(self.state)
+      previous=self.controls.pending;command=None if self.read_only else self.controls.take(self.control_state())
       if previous and self.controls.pending is None:self.trace_command('cancelled',previous,self.controls.message)
      if command:
       if self.readiness_test:

@@ -23,6 +23,7 @@ class Controls:
   if key in self.seen:return
   if self.pending or self.uncertain:raise ValueError('Wait for confirmation; reconnect after an unconfirmed result')
   if state.get('connection')!='Connected' or now-state.get('_received',0)>3:raise ValueError('Fresh amplifier communication is required')
+  if state.get('fault_active') and action!='autotune-stop':raise ValueError('Amplifier fault active; commands are blocked until it clears')
   if state.get('transmitting') and action!='autotune-stop':raise ValueError('Stop transmission before changing amplifier state')
   reason=tune_guard(action,state)
   if reason:raise ValueError(reason)
@@ -39,7 +40,8 @@ class Controls:
  def take(self,state):
   if not self.pending or self.pending['sent'] is not None:return None
   reason=None
-  if state.get('transmitting') and self.pending['action']!='autotune-stop':reason='amplifier is transmitting'
+  if state.get('fault_active') and self.pending['action']!='autotune-stop':reason='amplifier fault is active'
+  elif state.get('transmitting') and self.pending['action']!='autotune-stop':reason='amplifier is transmitting'
   elif state.get('connection')!='Connected' or time.monotonic()-state.get('_received',0)>3:reason='fresh amplifier data is unavailable'
   elif state.get('status') in ('Cooling down','Warming up'):reason='amplifier countdown is active'
   elif self.pending['action']=='on' and state.get('status') in ('On','Operate','Standby'):reason='amplifier is already on'

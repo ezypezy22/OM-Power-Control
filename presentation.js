@@ -6,6 +6,8 @@ function amplifierPresentation(s) {
  if(connection==='Stale')return {kind:'stale',title:'Readings delayed',detail:'Waiting for fresh amplifier data · controls paused'};
  if(connection!=='Connected')return {kind:'offline',title:'Disconnected',detail:'Amplifier state unavailable'};
  const mode=s.status||'Unknown';
+ if(s.alert&&(s.alert.kind==='hard_fault'||s.alert.kind==='hv_fault'))return {kind:'fault',title:s.alert.kind==='hv_fault'?'High-voltage fault':'Hard fault',detail:s.alert.text};
+ if(mode==='Cooling down'&&Number.isFinite(s.cooling_temp_c)&&!Number.isInteger(s.countdown))return {kind:'cooling',title:'Cooling down',detail:'Waiting to cool below 40 °C · now '+s.cooling_temp_c+' °C · reported by amplifier'};
  if(mode==='Warming up'||mode==='Cooling down') {
   const n=Number.isInteger(s.countdown)&&s.countdown>=0?s.countdown:null;
   const remaining=n===null?'Waiting for amplifier countdown':Math.floor(n/60)+':'+String(n%60).padStart(2,'0')+' remaining';
@@ -18,7 +20,13 @@ function amplifierPresentation(s) {
  if(mode==='Off')return {kind:'off',title:'Amplifier off',detail:'Network listener connected'};
  return {kind:'waiting',title:'Awaiting mode confirmation',detail:mode==='On'?'Powered on · waiting for operating mode':'Connected · operating mode not yet reported'};
 }
-if(typeof module!=='undefined')module.exports={amplifierPresentation};
+/* Non-fault amplifier alerts (WGx/FAx warnings, soft-start error) shown beside, not instead of, the operating state. */
+function alertPresentation(s){
+ const a=s.alert;
+ if(!a||a.kind==='hard_fault'||a.kind==='hv_fault')return {visible:false,kind:'',text:''};
+ return {visible:true,kind:a.kind,text:a.text};
+}
+if(typeof module!=='undefined')module.exports={amplifierPresentation,alertPresentation};
 
 function amplifierControls(s,localPending=false){
  const mode=s.status||'Unknown',c=s.control||{};
@@ -28,6 +36,7 @@ function amplifierControls(s,localPending=false){
  else if(s.mode_test)reason='Restricted Operate/Standby test: commands are managed by the test; power and tuning are blocked.';
  else if(s.read_only)reason='Read-only telemetry: operating and tuning commands are blocked.';
  else if(s.settings?.model&&s.settings.model!=='OM-3501A')reason='Monitoring only: controls are unverified for this model.';
+ else if(s.alert&&(s.alert.kind==='hard_fault'||s.alert.kind==='hv_fault'))reason='Amplifier fault active: commands are blocked. '+s.alert.text;
  else if(s.connection!=='Connected'||s.age_seconds>3)reason='Connect and wait for fresh amplifier data to use controls.';
  else if(c.uncertain)reason='Command result is uncertain. Reconnect to reassess; no retry was sent.';
  else if(localPending||c.pending)reason='Waiting for amplifier confirmation…';
@@ -117,6 +126,9 @@ function autotunePresentation(s,pending=false){
  if(s.readiness_test)detail='NO-RF TEST: do not transmit. Verify readiness, Exit, then return to Standby; no successful tune is expected.';
  if(s.rf_state_unknown)detail+=' RF state is unconfirmed; keep RF off and check the amplifier.';
  const stopBlocked=s.read_only||s.mode_test||s.power_test||s.readiness_test||s.settings?.model!=='OM-3501A'||!link||pending||s.control?.pending||s.control?.uncertain||phase!=='tuning';
- return {stopDisabled:!!stopBlocked||!!(s.tune_test&&s.tune_test_counts?.['8']),phase,title,detail,visible:phase!=='idle',startDisabled:!!reason||active||s.status!=='Operate'||!!(s.tune_test&&s.tune_test_counts?.L),exitDisabled:!!reason||!!(s.tune_test&&s.tune_test_counts?.['*'])||(phase!=='waiting'&&!(phase==='aborted'&&['rf_lost','stop'].includes(s.autotune_abort_origin))),reason};
+ const pct=v=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(1)+' %':null;
+ const parts=[['Load',pct(s.load_pct)],['Tune',pct(s.tune_pct)]].filter(x=>x[1]).map(x=>x.join(' '));
+ const positions=link&&phase!=='idle'&&!(active&&s.autotune_age_seconds>15)&&parts.length?'Capacitor positions · '+parts.join(' · '):'';
+ return {positions,stopDisabled:!!stopBlocked||!!(s.tune_test&&s.tune_test_counts?.['8']),phase,title,detail,visible:phase!=='idle',startDisabled:!!reason||active||s.status!=='Operate'||!!(s.tune_test&&s.tune_test_counts?.L),exitDisabled:!!reason||!!(s.tune_test&&s.tune_test_counts?.['*'])||(phase!=='waiting'&&!(phase==='aborted'&&['rf_lost','stop'].includes(s.autotune_abort_origin))),reason};
 }
 if(typeof module!=='undefined')module.exports.autotunePresentation=autotunePresentation;
