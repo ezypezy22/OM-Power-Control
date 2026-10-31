@@ -30,7 +30,7 @@ The first public build is intended as a beta. Hardware verification so far cover
 - Successful-tune banner stays visible until Dismiss is clicked; a new successful tune shows it again.
 - Amplifier alerts: warnings (WGx) and second-limit alerts (FAx) appear in a banner and expire after 30 s; soft-start errors (FERROR) after 60 s. A hard fault (HF) or high-voltage fault (HVF) replaces the operating state and blocks operating commands (Stop during auto-tune is still allowed). HF clears when the amplifier stops reporting it; HVF stays until you reconnect. The app never sends a fault reset. While cooling above 40 °C the amplifier's reported temperature (CTx) is shown. These messages follow the manufacturer's protocol document and have not been provoked on hardware.
 - Amplifier-confirmed state, transmission guards and no automatic operating-command retries.
-- Full and compact views, saved stay-on-top and optional callsign badge.
+- Full and compact views, saved stay-on-top and optional callsign badge. The compact view adds a row of key readings: plate current, plate voltage, screen voltage and grid voltage (grid f and b separately on the OM-4001A).
 - Fixed 3500 W bar scale: green low-power region, amber at 1500 W, orange at 2500 W, red at 3500 W, with blended transitions. These are display colors, not calibrated protection limits or recommendations to transmit at a particular power.
 - Optional sharing with DX Caliber, off by default: the embedded panel uses this app’s existing amplifier connection. Standalone use does not require DX Caliber. With DXC DEV 0.6.116 or later, its embedded meter follows the measurement selected here.
 - Save settings shows immediate saving and success/error feedback.

@@ -30,5 +30,15 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
  const saving=nodes.save.onclick();assert.equal(nodes.save.disabled,true);assert.equal(nodes.save.textContent,'Saving…');assert.equal(nodes.settingsSaveStatus.textContent,'Saving settings…');
  finishSave({ok:true,json:async()=>({})});await saving;assert.equal(nodes.save.disabled,false);assert.equal(nodes.settingsSaveStatus.textContent,'Settings saved.');
  ctx.fetch=async()=>({ok:false,json:async()=>({error:'Disk full'})});await nodes.save.onclick();assert.equal(nodes.settingsSaveStatus.dataset.error,'true');assert.match(nodes.settingsSaveStatus.textContent,/not saved: Disk full/);ctx.fetch=oldFetch;
+ // Compact key readings and per-model tube labels (OM-4001A shows grid f/b separately).
+ state={...state,connection:'Connected',age_seconds:0,plate_a:.85,plate_v:2900,screen_v:300,grid_v:-75,grid_a_v:75,grid_b_v:150,model_profile:{tube_labels:['f','b'],grid_separate:true,full_scale_w:5000,screen_ma_range:[-80,80],screen_ma_tick_step:20,forward_ticks_w:[0,2500,5000]}};
+ await vm.runInContext('refresh()',ctx);
+ assert.equal(nodes.key_plate_a.textContent,'0.85 A');assert.equal(nodes.key_plate_v.textContent,'2,900 V');assert.equal(nodes.key_screen_v.textContent,'300 V');
+ assert.equal(nodes.key_grid_a_v.textContent,'75 V');assert.equal(nodes.key_grid_b_v.textContent,'150 V');
+ assert.equal(nodes.keycell_grid_v.hidden,true);assert.equal(nodes.keycell_grid_a_v.hidden,false);assert.equal(nodes.keycell_grid_b_v.hidden,false);
+ assert.equal(nodes.keylabel_grid_a_v.textContent,'Ugrid f');assert.equal(nodes.label_heater_b_v.textContent,'Heater b · Uheat b');assert.equal(nodes.measurement_grid_b_v.textContent,'150 V');
+ assert.match(nodes.powerTicks.innerHTML,/>2\.5</);assert.match(nodes.auxTicks.innerHTML,/\+80 mA/);
+ state={...state,model_profile:undefined};await vm.runInContext('refresh()',ctx);
+ assert.equal(nodes.keycell_grid_v.hidden,false);assert.equal(nodes.keycell_grid_a_v.hidden,true);assert.equal(nodes.keylabel_grid_a_v.textContent,'Ugrid A');assert.match(nodes.powerTicks.innerHTML,/3,500 W/);
  console.log('Actual UI handlers: toggle skips prompt; power confirmations retained; RF guard and callsign badge pass');
 })().catch(e=>{console.error(e);process.exitCode=1});
