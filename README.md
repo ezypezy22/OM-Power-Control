@@ -23,7 +23,7 @@ The first public build is intended as a beta. Hardware verification so far cover
 - Expandable measurements: input power, plate current/voltage, screen current/voltage, grid voltage, heater voltages, mains voltage, temperature and calculated gain. Unavailable or stale telemetry is shown as a dash.
 - Saved display selector under Measurements: replace the reflected-power panel with input power, plate current or calculated gain, each with its own units and bar scale. The current choice is disabled in the menu.
 - SWR and reflected readings share a blended green/amber/red mismatch color; idle or unavailable readings are neutral.
-- Editable amplifier model label. OM-3501A is tested; other model names enable monitoring only and block operating commands. The model label does not select a different protocol.
+- Editable amplifier model label. OM-3501A is tested. OM-4001A is supported for monitoring only: it uses a 4000 W display scale (a placeholder until checked against hardware) and its operating commands stay blocked until validated on a real amplifier. Other model names use the 3500 W scale, also monitoring only. The model label selects display scale and control gating (see profiles.py); it does not select a different protocol.
 - Operate/Standby, normal shutdown/cooling, and power-on/warm-up.
 - Automatic tuning with amplifier-confirmed readiness, live measurements, successful completion/automatic saving, Exit and Stop. The operator sets drive power and supplies/stops RF; the app never keys or adjusts the radio.
 - Separate results for RF-interrupted/default-settings recovery and settings saved after Stop. Unexpected replies, delayed status and unconfirmed commands never count as successful tuning.

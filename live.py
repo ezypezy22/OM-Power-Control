@@ -11,6 +11,7 @@ FAULT_KINDS=('hard_fault','hv_fault')
 EXTRA_FIELDS=(*SLOW_FIELDS,'screen_ma','frequency_khz')
 from controls import Controls
 import settings
+from profiles import profile as model_profile
 from collections import deque
 from session_protocol import amplifier_session
 
@@ -71,6 +72,7 @@ class Monitor:
   for key in EXTRA_FIELDS:
    limit=12 if key=='frequency_khz' else 3
    if s['connection']!='Connected' or now-field_times.get(key,0)>limit:s[key]=None
+  s['model_profile']=model_profile(s.get('settings',{}).get('model'))
   s['alert'],s['alert_age_seconds']=alert_age({**s,'_field_times':field_times},now)
   s['grid_v']=s['grid_a_v']-s['grid_b_v'] if s.get('grid_a_v') is not None and s.get('grid_b_v') is not None else None
   if s.get('forward') is None or s.get('input') is None:s['gain_db']=None
@@ -136,7 +138,7 @@ class Monitor:
      if not duplicate:
       if self.mode_test_sent>=2:raise ValueError('Operate/Standby test is complete; further commands are blocked')
       if expected_mode!=('Standby' if self.mode_test_sent==0 else 'Operate'):raise ValueError('Mode test requires Standby to Operate, then Operate to Standby')
-    if self.settings.get('model','OM-3501A')!='OM-3501A':raise ValueError('Monitoring only: controls are unverified for this model')
+    if not model_profile(self.settings.get('model','OM-3501A'))['controls_verified']:raise ValueError('Monitoring only: controls are unverified for this model')
     duplicate=key in self.controls.seen if isinstance(key,str) else False
     self.controls.request(action,key,self.control_state(),expected_mode)
    except ValueError as exc:self.trace_command('rejected',pending,str(exc));raise

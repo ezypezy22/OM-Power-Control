@@ -28,6 +28,14 @@ function alertPresentation(s){
 }
 if(typeof module!=='undefined')module.exports={amplifierPresentation,alertPresentation};
 
+/* Operating commands need a model whose controls were validated on hardware (profiles.py). Without
+   a server-supplied profile, fall back to the OM-3501A name check; whenUnknown covers a missing model. */
+function controlsVerified(s,whenUnknown){
+ if(s.model_profile)return s.model_profile.controls_verified===true;
+ const model=s.settings?.model;return model?model==='OM-3501A':whenUnknown;
+}
+if(typeof module!=='undefined')module.exports.controlsVerified=controlsVerified;
+
 function amplifierControls(s,localPending=false){
  const mode=s.status||'Unknown',c=s.control||{};
  let reason='';
@@ -35,7 +43,7 @@ function amplifierControls(s,localPending=false){
  else if(s.power_test)reason='Restricted power-cycle test: commands are managed by the test; Operate and tuning are blocked.';
  else if(s.mode_test)reason='Restricted Operate/Standby test: commands are managed by the test; power and tuning are blocked.';
  else if(s.read_only)reason='Read-only telemetry: operating and tuning commands are blocked.';
- else if(s.settings?.model&&s.settings.model!=='OM-3501A')reason='Monitoring only: controls are unverified for this model.';
+ else if(!controlsVerified(s,true))reason='Monitoring only: controls are unverified for this model.';
  else if(s.alert&&(s.alert.kind==='hard_fault'||s.alert.kind==='hv_fault'))reason='Amplifier fault active: commands are blocked. '+s.alert.text;
  else if(s.connection!=='Connected'||s.age_seconds>3)reason='Connect and wait for fresh amplifier data to use controls.';
  else if(c.uncertain)reason='Command result is uncertain. Reconnect to reassess; no retry was sent.';
@@ -74,9 +82,12 @@ function amplifierConnection(s){
 }
 if(typeof module!=='undefined')module.exports.amplifierConnection=amplifierConnection;
 
-// The gradient occupies the entire fixed 3500 W track. Reveal it without rescaling its colors.
-function forwardPowerClip(watts){const value=typeof watts==='number'&&Number.isFinite(watts)?Math.max(0,Math.min(3500,watts)):0;return 'inset(0 '+(100-value/3500*100).toFixed(3)+'% 0 0)'}
-if(typeof module!=='undefined')module.exports.forwardPowerClip=forwardPowerClip;
+// The gradient occupies the whole track, whose full scale comes from the model profile (default 3500 W).
+// Reveal it without rescaling its colors.
+function forwardPowerClip(watts,fullScale=3500){const value=typeof watts==='number'&&Number.isFinite(watts)?Math.max(0,Math.min(fullScale,watts)):0;return 'inset(0 '+(100-value/fullScale*100).toFixed(3)+'% 0 0)'}
+function forwardPowerScale(s){const w=s?.model_profile?.full_scale_w;return Number.isFinite(w)&&w>0?w:3500}
+function forwardPowerTicks(fullScale){return [0,1,2,3,4,5].map(i=>(fullScale*i/5).toLocaleString('en-US',{maximumFractionDigits:0})+(i===5?' W':''))}
+if(typeof module!=='undefined'){module.exports.forwardPowerClip=forwardPowerClip;module.exports.forwardPowerScale=forwardPowerScale;module.exports.forwardPowerTicks=forwardPowerTicks;}
 
 // Both readings describe the same mismatch. Color only fresh, active RF data.
 function mismatchColor(s){
@@ -118,14 +129,14 @@ if(typeof module!=='undefined'){module.exports.secondaryMeter=secondaryMeter;mod
 
 function autotunePresentation(s,pending=false){
  const phase=s.autotune_phase||'idle',active=['entered','waiting','tuning','unknown','aborted'].includes(phase),link=s.connection==='Connected'&&!(s.age_seconds>3);
- let reason='';if(s.readiness_test)reason='No-RF readiness test: commands are managed by the test; do not transmit.';else if(s.power_test)reason='Restricted power-cycle test: tuning commands are blocked.';else if(s.mode_test)reason='Restricted Operate/Standby test: tuning commands are blocked.';else if(s.read_only)reason='Read-only telemetry: operating and tuning commands are blocked.';else if(s.settings?.model!=='OM-3501A')reason='Auto-tune is verified only for OM-3501A.';else if(!link)reason='Fresh amplifier communication is required.';else if(pending||s.control?.pending)reason='Waiting for command confirmation.';else if(s.control?.uncertain)reason='Command result uncertain; check amplifier. No retry was sent.';else if(s.rf_state_unknown)reason='RF state is unconfirmed; keep RF off and check the amplifier.';else if(s.transmitting)reason='Stop RF before using tuning controls.';else if(s.control?.cooldown_remaining>0)reason='Please wait before another command.';
+ let reason='';if(s.readiness_test)reason='No-RF readiness test: commands are managed by the test; do not transmit.';else if(s.power_test)reason='Restricted power-cycle test: tuning commands are blocked.';else if(s.mode_test)reason='Restricted Operate/Standby test: tuning commands are blocked.';else if(s.read_only)reason='Read-only telemetry: operating and tuning commands are blocked.';else if(!controlsVerified(s,false))reason='Auto-tune is verified only for OM-3501A.';else if(!link)reason='Fresh amplifier communication is required.';else if(pending||s.control?.pending)reason='Waiting for command confirmation.';else if(s.control?.uncertain)reason='Command result uncertain; check amplifier. No retry was sent.';else if(s.rf_state_unknown)reason='RF state is unconfirmed; keep RF off and check the amplifier.';else if(s.transmitting)reason='Stop RF before using tuning controls.';else if(s.control?.cooldown_remaining>0)reason='Please wait before another command.';
  let title={idle:'Automatic tuning',entered:'Preparing auto-tune',waiting:'WAITING FOR INPUT POWER',tuning:'AUTO-TUNE IN PROGRESS',succeeded:'SUCCESSFUL AUTOTUNE!',cancelled:'Auto-tune exited',aborted:'AUTO-TUNE ABORTED',defaults:'Auto-tune exited · defaults restored','stopped-exited':'Stopped tune exited · settings saved',unknown:'Unexpected auto-tune response'}[phase]||'Unexpected auto-tune response';
  let detail={idle:'Operator sets tuning power and supplies the steady carrier.',entered:'Waiting for amplifier readiness.',waiting:'Set the prescribed tuning drive level, then transmit a steady carrier from your radio.',tuning:'Operator controls RF. Stop RF manually if tuning is abnormal.',succeeded:s.autotune_saved?'Amplifier reported settings saved automatically. Stop tuning RF.':'Amplifier reported tuning complete. Stop tuning RF.',cancelled:'Returned from automatic tuning without applying RF.',aborted:s.autotune_abort_origin==='rf_lost'?'RF was released before completion. Exit auto-tune to restore default settings; this was not a successful tune.':s.autotune_abort_origin==='stop'?'Tuning was stopped. Release RF, then use Exit; the amplifier may save its current settings. This is not a successful tune.':'Stop RF manually and check the amplifier. The abort cause is unrecognized.',defaults:'Amplifier reported default settings saved. No successful tune was saved.','stopped-exited':'Amplifier reported user settings saved after Stop. Successful tuning was not confirmed.',unknown:(s.autotune_message||'Unrecognized response')+' · Stop RF and check the amplifier; no retry is sent.'}[phase];
  if(active&&!link){title='Auto-tune result unknown';detail='Communication interrupted. Stop RF manually and check the amplifier.';}
  else if(active&&s.autotune_age_seconds>15){title='Auto-tune status delayed';detail='No recent tuning status. Stop RF manually and check the amplifier; no retry is sent.';}
  if(s.readiness_test)detail='NO-RF TEST: do not transmit. Verify readiness, Exit, then return to Standby; no successful tune is expected.';
  if(s.rf_state_unknown)detail+=' RF state is unconfirmed; keep RF off and check the amplifier.';
- const stopBlocked=s.read_only||s.mode_test||s.power_test||s.readiness_test||s.settings?.model!=='OM-3501A'||!link||pending||s.control?.pending||s.control?.uncertain||phase!=='tuning';
+ const stopBlocked=s.read_only||s.mode_test||s.power_test||s.readiness_test||!controlsVerified(s,false)||!link||pending||s.control?.pending||s.control?.uncertain||phase!=='tuning';
  const pct=v=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(1)+' %':null;
  const parts=[['Load',pct(s.load_pct)],['Tune',pct(s.tune_pct)]].filter(x=>x[1]).map(x=>x.join(' '));
  const positions=link&&phase!=='idle'&&!(active&&s.autotune_age_seconds>15)&&parts.length?'Capacitor positions · '+parts.join(' · '):'';

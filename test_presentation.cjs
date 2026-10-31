@@ -104,4 +104,16 @@ console.log('Selectable secondary-meter ranges and unavailable states pass');
  assert.equal(t({...base,connection:'Disconnected'}).positions,'');
  console.log('Capacitor position presentation checks passed');
 }
+{
+ const {forwardPowerClip:clip2,forwardPowerScale:scale,forwardPowerTicks:ticks,controlsVerified:cv,amplifierControls:ctl,autotunePresentation:tune}=require('./presentation.js');
+ assert.equal(clip2(2000,4000),'inset(0 50.000% 0 0)');assert.equal(clip2(9999,4000),'inset(0 0.000% 0 0)');assert.equal(clip2(1500),'inset(0 57.143% 0 0)');
+ assert.equal(scale({model_profile:{full_scale_w:4000}}),4000);assert.equal(scale({}),3500);assert.equal(scale({model_profile:{full_scale_w:0}}),3500);
+ assert.deepEqual(ticks(3500),['0','700','1,400','2,100','2,800','3,500 W']);assert.deepEqual(ticks(4000),['0','800','1,600','2,400','3,200','4,000 W']);
+ const m4={model_profile:{controls_verified:false,full_scale_w:4000},settings:{model:'OM-4001A'}},m3={model_profile:{controls_verified:true,full_scale_w:3500},settings:{model:'OM-3501A'}};
+ assert.equal(cv(m4,true),false);assert.equal(cv(m3,false),true);assert.equal(cv({settings:{model:'OM-3501A'}},false),true);assert.equal(cv({settings:{model:'X'}},true),false);assert.equal(cv({},true),true);assert.equal(cv({},false),false);
+ const up={...live,age_seconds:0,status:'Standby'};
+ assert.equal(ctl({...up,...m4}).toggle.disabled,true);assert.match(ctl({...up,...m4}).reason,/Monitoring only/);assert.equal(ctl({...up,...m3}).toggle.disabled,false);
+ assert.equal(tune({...up,...m4,status:'Operate'}).startDisabled,true);assert.equal(tune({...up,...m3,status:'Operate'}).startDisabled,false);
+ console.log('Model profile presentation checks passed');
+}
 }
