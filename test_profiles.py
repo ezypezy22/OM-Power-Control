@@ -12,6 +12,10 @@ class Tests(unittest.TestCase):
   profile('OM-4001A')['screen_ma_range'][0]=0;self.assertEqual(profile('OM-4001A')['screen_ma_range'],[-80,80])
   profile('zzz')['screen_ma_range'][0]=0;self.assertEqual(profile('zzz')['screen_ma_range'],[-60,60])
   profile('zzz')['full_scale_w']=1;self.assertEqual(profile('zzz')['full_scale_w'],3500)
+ def test_4001a_vendor_style_marks_and_tube_labels(self):
+  p=profile('OM-4001A');self.assertEqual(p['forward_ticks_w'][-1],4800);self.assertEqual(len(p['forward_ticks_w']),13);self.assertEqual(p['reflected_ticks_w'],[0,50,100,150,200,250]);self.assertEqual(p['input_ticks_w'][-1],90)
+  self.assertEqual((p['tube_labels'],p['grid_separate'],p['screen_ma_tick_step']),(['f','b'],True,20))
+  d=profile('OM-3501A');self.assertEqual((d['tube_labels'],d['grid_separate']),(['A','B'],False));self.assertNotIn('forward_ticks_w',d)
  def monitor(self,model):
   m=Monitor(simulate=True);m.settings['model']=model;now=time.monotonic()
   m.state={'connection':'Connected','_received':now,'status':'Standby','transmitting':False,'_field_times':{}};return m

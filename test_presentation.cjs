@@ -128,4 +128,15 @@ console.log('Selectable secondary-meter ranges and unavailable states pass');
  assert.equal(sec({...up,...mp,input:50},'input').position,50);assert.equal(sec({...up,...mp,plate_a:1.5},'plate_a').position,50);
  console.log('Per-model meter range checks passed');
 }
+{
+ const {forwardPowerMarks:marks,auxiliaryMeter:aux3,secondaryMeter:sec3}=require('./presentation.js');
+ const v4={model_profile:{full_scale_w:5000,reflected_max_w:250,input_max_w:100,screen_ma_range:[-80,80],screen_ma_tick_step:20,forward_ticks_w:[0,400,800,1200,1600,2000,2400,2800,3200,3600,4000,4400,4800],reflected_ticks_w:[0,50,100,150,200,250],input_ticks_w:[0,10,20,30,40,50,60,70,80,90]}},up={connection:'Connected',age_seconds:0};
+ const fm=marks(v4);assert.equal(fm.length,13);assert.deepEqual(fm.map(m=>m.label).slice(0,6),['0','0.4','0.8','1.2','1.6','2.0']);assert.equal(fm[10].label,'4.0');assert.equal(fm[12].label,'4.8');assert.equal(fm[12].position,96);assert.equal(fm[0].position,0);
+ assert.deepEqual(marks({}).map(m=>m.label),['0','700','1,400','2,100','2,800','3,500 W']);assert.deepEqual(marks({}).map(m=>m.position),[0,20,40,60,80,100]);
+ const at=aux3({...up,...v4,screen_ma:0}).ticks;assert.equal(at.length,9);assert.deepEqual(at.map(t=>t.label),['\u221280','\u221260','\u221240','\u221220','0','+20','+40','+60','+80']);assert.equal(at[4].position,50);
+ const rm=sec3({...up,...v4,reflected:50},'reflected');assert.deepEqual(rm.tickMarks.map(t=>t.label),['0','50','100','150','200','250']);assert.equal(rm.tickMarks[1].position,20);assert.equal(rm.position,20);
+ const im=sec3({...up,...v4,input:90},'input');assert.equal(im.tickMarks.length,10);assert.equal(im.tickMarks[9].position,90);assert.equal(im.position,90);
+ const dm=sec3({...up,reflected:1},'reflected');assert.deepEqual(dm.tickMarks.map(t=>t.label),['0','250','500 W']);assert.deepEqual(dm.tickMarks.map(t=>t.position),[0,50,100]);
+ console.log('Vendor-style scale mark checks passed');
+}
 }

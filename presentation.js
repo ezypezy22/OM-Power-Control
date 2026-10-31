@@ -86,8 +86,14 @@ if(typeof module!=='undefined')module.exports.amplifierConnection=amplifierConne
 // Reveal it without rescaling its colors.
 function forwardPowerClip(watts,fullScale=3500){const value=typeof watts==='number'&&Number.isFinite(watts)?Math.max(0,Math.min(fullScale,watts)):0;return 'inset(0 '+(100-value/fullScale*100).toFixed(3)+'% 0 0)'}
 function forwardPowerScale(s){const w=s?.model_profile?.full_scale_w;return Number.isFinite(w)&&w>0?w:3500}
+/* Positioned scale marks {position:%, label}. A profile list (watts, shown as kW) replaces the five even steps. */
+function forwardPowerMarks(s){
+ const full=forwardPowerScale(s),list=s?.model_profile?.forward_ticks_w;
+ if(Array.isArray(list)&&list.length>1)return list.map(w=>({position:100*w/full,label:w===0?'0':(w/1000).toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1})}));
+ return forwardPowerTicks(full).map((label,i)=>({position:i*20,label}));
+}
 function forwardPowerTicks(fullScale){return [0,1,2,3,4,5].map(i=>(fullScale*i/5).toLocaleString('en-US',{maximumFractionDigits:0})+(i===5?' W':''))}
-if(typeof module!=='undefined'){module.exports.forwardPowerClip=forwardPowerClip;module.exports.forwardPowerScale=forwardPowerScale;module.exports.forwardPowerTicks=forwardPowerTicks;}
+if(typeof module!=='undefined'){module.exports.forwardPowerClip=forwardPowerClip;module.exports.forwardPowerScale=forwardPowerScale;module.exports.forwardPowerTicks=forwardPowerTicks;module.exports.forwardPowerMarks=forwardPowerMarks;}
 
 // Both readings describe the same mismatch. Color only fresh, active RF data.
 function mismatchColor(s){
@@ -106,11 +112,13 @@ if(typeof module!=='undefined')module.exports.mismatchColor=mismatchColor;
 const OM3501A_PROFILE=Object.freeze({key:'screen_ma',label:'Screen current · Iscreen',unit:'mA',min:-60,max:60});
 function auxiliaryMeter(s,profile=OM3501A_PROFILE){
  const range=s.model_profile?.screen_ma_range;
- if(profile===OM3501A_PROFILE&&Array.isArray(range)&&range.length===2&&range[0]<range[1])profile={...profile,min:range[0],max:range[1]};
+ const screen=profile===OM3501A_PROFILE;
+ if(screen&&Array.isArray(range)&&range.length===2&&range[0]<range[1])profile={...profile,min:range[0],max:range[1]};
  const value=s[profile.key],valid=s.connection==='Connected'&&!(s.age_seconds>3)&&typeof value==='number'&&Number.isFinite(value);
  const position=valid?100*(Math.max(profile.min,Math.min(profile.max,value))-profile.min)/(profile.max-profile.min):50;
- const sign=v=>v>0?'+'+v:v<0?'\u2212'+(-v):'0';
- const ticks=[0,1,2,3,4].map(i=>({position:i*25,label:sign(Math.round((profile.min+(profile.max-profile.min)*i/4)*10)/10)}));
+ const sign=v=>v>0?'+'+v:v<0?'\u2212'+(-v):'0',step=s.model_profile?.screen_ma_tick_step,span=profile.max-profile.min;
+ const values=!screen||!(step>0)||span/step>40?[0,1,2,3,4].map(i=>Math.round((profile.min+span*i/4)*10)/10):Array.from({length:Math.floor(span/step)+1},(_,i)=>profile.min+i*step);
+ const ticks=values.map(v=>({position:100*(v-profile.min)/span,label:sign(v)}));
  return {label:profile.label,unit:profile.unit,value:valid?value:null,position,min:profile.min,max:profile.max,ticks};
 }
 if(typeof module!=='undefined')module.exports.auxiliaryMeter=auxiliaryMeter;
@@ -129,7 +137,10 @@ function secondaryMeter(s,key='reflected'){
  const p=Number.isFinite(limit)&&limit>0?{...base,max:limit}:base;
  const valid=s.connection==='Connected'&&!(s.age_seconds>3)&&typeof v==='number'&&Number.isFinite(v);
  const value=valid?v:null,position=value===null?0:100*Math.max(0,Math.min(p.max,value))/p.max;
- return {...p,key,value,position,ticks:[0,p.max/2,p.max],color:key==='reflected'?mismatchColor(s):value===null?'#a5b2b6':'#79d5b3'};
+ const list={reflected:s.model_profile?.reflected_ticks_w,input:s.model_profile?.input_ticks_w}[key],custom=Array.isArray(list)&&list.length>1;
+ const ticks=custom?list:[0,p.max/2,p.max];
+ const tickMarks=ticks.map((v,i)=>({position:100*v/p.max,label:v.toLocaleString('en-US',{maximumFractionDigits:2})+(!custom&&i===ticks.length-1?' '+p.unit:'')}));
+ return {...p,key,value,position,ticks,tickMarks,color:key==='reflected'?mismatchColor(s):value===null?'#a5b2b6':'#79d5b3'};
 }
 if(typeof module!=='undefined'){module.exports.secondaryMeter=secondaryMeter;module.exports.SECONDARY_PROFILES=SECONDARY_PROFILES;}
 
