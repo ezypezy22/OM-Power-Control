@@ -105,9 +105,13 @@ if(typeof module!=='undefined')module.exports.mismatchColor=mismatchColor;
 // Model profile: keep the monitored parameter separate from its visual meter.
 const OM3501A_PROFILE=Object.freeze({key:'screen_ma',label:'Screen current · Iscreen',unit:'mA',min:-60,max:60});
 function auxiliaryMeter(s,profile=OM3501A_PROFILE){
+ const range=s.model_profile?.screen_ma_range;
+ if(profile===OM3501A_PROFILE&&Array.isArray(range)&&range.length===2&&range[0]<range[1])profile={...profile,min:range[0],max:range[1]};
  const value=s[profile.key],valid=s.connection==='Connected'&&!(s.age_seconds>3)&&typeof value==='number'&&Number.isFinite(value);
  const position=valid?100*(Math.max(profile.min,Math.min(profile.max,value))-profile.min)/(profile.max-profile.min):50;
- return {label:profile.label,unit:profile.unit,value:valid?value:null,position,min:profile.min,max:profile.max};
+ const sign=v=>v>0?'+'+v:v<0?'\u2212'+(-v):'0';
+ const ticks=[0,1,2,3,4].map(i=>({position:i*25,label:sign(Math.round((profile.min+(profile.max-profile.min)*i/4)*10)/10)}));
+ return {label:profile.label,unit:profile.unit,value:valid?value:null,position,min:profile.min,max:profile.max,ticks};
 }
 if(typeof module!=='undefined')module.exports.auxiliaryMeter=auxiliaryMeter;
 
@@ -120,7 +124,9 @@ const SECONDARY_PROFILES=Object.freeze({
 });
 function secondaryMeter(s,key='reflected'){
  if(!Object.hasOwn(SECONDARY_PROFILES,key))key='reflected';
- const p=SECONDARY_PROFILES[key],v=s[key];
+ const base=SECONDARY_PROFILES[key],v=s[key];
+ const limit={reflected:s.model_profile?.reflected_max_w,input:s.model_profile?.input_max_w}[key];
+ const p=Number.isFinite(limit)&&limit>0?{...base,max:limit}:base;
  const valid=s.connection==='Connected'&&!(s.age_seconds>3)&&typeof v==='number'&&Number.isFinite(v);
  const value=valid?v:null,position=value===null?0:100*Math.max(0,Math.min(p.max,value))/p.max;
  return {...p,key,value,position,ticks:[0,p.max/2,p.max],color:key==='reflected'?mismatchColor(s):value===null?'#a5b2b6':'#79d5b3'};

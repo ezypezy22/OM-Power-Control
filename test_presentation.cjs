@@ -116,4 +116,16 @@ console.log('Selectable secondary-meter ranges and unavailable states pass');
  assert.equal(tune({...up,...m4,status:'Operate'}).startDisabled,true);assert.equal(tune({...up,...m3,status:'Operate'}).startDisabled,false);
  console.log('Model profile presentation checks passed');
 }
+{
+ const {auxiliaryMeter:aux2,secondaryMeter:sec}=require('./presentation.js');
+ const mp={model_profile:{reflected_max_w:250,input_max_w:100,screen_ma_range:[-80,80]}},up={connection:'Connected',age_seconds:0};
+ assert.equal(aux2({...up,...mp,screen_ma:0}).position,50);assert.equal(aux2({...up,...mp,screen_ma:40}).position,75);assert.equal(aux2({...up,...mp,screen_ma:-200}).position,0);
+ assert.deepEqual(aux2({...up,...mp,screen_ma:0}).ticks.map(t=>t.label),['\u221280','\u221240','0','+40','+80']);
+ assert.deepEqual(aux2({...up,screen_ma:0}).ticks.map(t=>t.label),['\u221260','\u221230','0','+30','+60']);
+ assert.deepEqual(aux2({...up,model_profile:{screen_ma_range:[5,1]},screen_ma:0}).ticks.map(t=>t.label),['\u221260','\u221230','0','+30','+60']);
+ assert.equal(sec({...up,...mp,reflected:125},'reflected').position,50);assert.equal(sec({...up,...mp,reflected:125},'reflected').ticks[2],250);
+ assert.equal(sec({...up,reflected:250},'reflected').position,50);
+ assert.equal(sec({...up,...mp,input:50},'input').position,50);assert.equal(sec({...up,...mp,plate_a:1.5},'plate_a').position,50);
+ console.log('Per-model meter range checks passed');
+}
 }
