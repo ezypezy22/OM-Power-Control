@@ -2,7 +2,7 @@
 function amplifierPresentation(s) {
  const connection=s.connection||'Disconnected';
  if(connection==='Disconnecting')return {kind:'waiting',title:'Disconnecting',detail:'Closing amplifier communication session'};
- if(connection==='Connecting'||connection==='Waiting for amplifier data')return {kind:'waiting',title:'Connecting',detail:connection==='Connecting'?'Opening amplifier connection':'Waiting for amplifier response'};
+ if(connection==='Connecting'||connection==='Waiting for amplifier data')return {kind:'waiting',title:'Connecting',detail:connection==='Connecting'?(s.connect_note||'Opening amplifier connection'):'Waiting for amplifier response'};
  if(connection==='Stale')return {kind:'stale',title:'Readings delayed',detail:'Waiting for fresh amplifier data · controls paused'};
  if(connection!=='Connected')return {kind:'offline',title:'Disconnected',detail:'Amplifier state unavailable'};
  const mode=s.status||'Unknown';
@@ -70,7 +70,7 @@ function amplifierConnection(s){
  let result={endpoint,kind:'offline',badge:'OFFLINE',label:'Disconnected',detail:'No amplifier connection',error:''};
  if(state==='Connected')result={...result,kind:'live',badge:'LIVE',label:'Connected',detail:'Receiving amplifier data'};
  else if(state==='Disconnecting')result={...result,kind:'waiting',badge:'CLOSING',label:'Disconnecting',detail:'Closing amplifier communication session'};
- else if(state==='Connecting')result={...result,kind:'waiting',badge:'CONNECTING',label:'Connecting',detail:'Opening amplifier connection'};
+ else if(state==='Connecting')result={...result,kind:'waiting',badge:'CONNECTING',label:'Connecting',detail:s.connect_note||'Opening amplifier connection'};
  else if(state==='Waiting for amplifier data')result={...result,kind:'waiting',badge:'WAITING',label:'Waiting for data',detail:'Connected to the listener; waiting for amplifier data'};
  else if(state==='Stale')result={...result,kind:'stale',badge:'DELAYED',label:'Data delayed',detail:'Fresh amplifier data is delayed; operating controls are paused'};
  if(s.error){

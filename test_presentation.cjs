@@ -139,4 +139,11 @@ console.log('Selectable secondary-meter ranges and unavailable states pass');
  const dm=sec3({...up,reflected:1},'reflected');assert.deepEqual(dm.tickMarks.map(t=>t.label),['0','250','500 W']);assert.deepEqual(dm.tickMarks.map(t=>t.position),[0,50,100]);
  console.log('Vendor-style scale mark checks passed');
 }
+{
+ const {amplifierConnection:conn}=require('./presentation.js');
+ const note='Waiting for network access to the amplifier. If macOS asks, choose Allow.';
+ assert.equal(p({connection:'Connecting',connect_note:note}).detail,note);assert.equal(p({connection:'Connecting'}).detail,'Opening amplifier connection');
+ assert.equal(conn({connection:'Connecting',connect_note:note,settings:{host:'h',port:1}}).detail,note);assert.equal(conn({connection:'Connecting',settings:{host:'h',port:1}}).detail,'Opening amplifier connection');
+ console.log('Connect wait note presentation checks passed');
+}
 }

@@ -1,5 +1,5 @@
 """Local monitoring prototype. Captured connection/status requests C, ?, and telemetry poll # only."""
-import argparse,json,socket,threading,time,secrets,tempfile,signal,os
+import argparse,errno,json,socket,threading,time,secrets,tempfile,signal,os
 from pathlib import Path
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 from decoder import Decoder
@@ -15,6 +15,15 @@ import settings
 from profiles import profile as model_profile
 from collections import deque
 from session_protocol import amplifier_session
+
+# Opening the TCP connection can fail while macOS is still asking for Local Network access (first launch)
+# and succeed once it is approved, so retry those failures, and only those, for a short while.
+CONNECT_RETRY_SECONDS=60
+CONNECT_RETRY_DELAY=2
+CONNECT_RETRY_NOTE='Waiting for network access to the amplifier. If macOS asks, choose Allow (System Settings > Privacy & Security > Local Network).'
+RETRY_ERRNOS=frozenset((errno.EHOSTUNREACH,errno.ENETUNREACH,errno.ETIMEDOUT,errno.ECONNREFUSED))
+def retryable_connect_error(error):
+ return isinstance(error,(socket.timeout,TimeoutError)) or (isinstance(error,OSError) and error.errno in RETRY_ERRNOS)
 
 def alert_age(state,now):
  """Return the active alert and seconds since it was last received, or (None, None) once expired."""
@@ -160,14 +169,24 @@ class Monitor:
    self.stop.set()
    if self.thread and self.thread.is_alive():self.state={'connection':'Disconnecting'}
  def run(self):
-  dec=Decoder();received=time.monotonic();measurement=0;field_times={}
+  retry_until=time.monotonic()+CONNECT_RETRY_SECONDS
+  while self.run_once(retry_until):
+   if self.stop.wait(CONNECT_RETRY_DELAY):
+    with self.lock:self.state={**self.state,'connection':'Disconnected'}
+    return
+ def run_once(self,retry_until=None):
+  """One connection attempt. Returns True when a failed TCP connect was left for run() to retry."""
+  dec=Decoder();received=time.monotonic();measurement=0;field_times={};tcp_connected=[False]
+  def record(event):
+   if event=='TCP connected':tcp_connected[0]=True
+   self.record_connection(event)
   try:
    if self.simulate:
     from simulator import simulated_session
     session=simulated_session(self.simulator,self.stop,self.record_connection)
    else:
     if not self.allow_hardware:raise ValueError('Hardware access is disabled')
-    session=amplifier_session((self.settings['host'],self.settings['port']),self.stop,self.record_connection,read_only=self.read_only,mode_test=self.mode_test,power_test=self.power_test,readiness_test=self.readiness_test,trace=self.trace)
+    session=amplifier_session((self.settings['host'],self.settings['port']),self.stop,record,read_only=self.read_only,mode_test=self.mode_test,power_test=self.power_test,readiness_test=self.readiness_test,trace=self.trace)
    with session as (sock,handshake):
     if self.tune_test:
      from session_protocol import TuneTestSocket
@@ -247,6 +266,10 @@ class Monitor:
        if previous and self.controls.pending is None:self.trace_command('uncertain' if self.controls.uncertain else 'confirmed',previous,self.controls.message)
        self.state={**updates[-1],'connection':'Connected','_received':received,'_measurement':measurement,'_field_times':dict(field_times)}
   except Exception as e:
+   if not tcp_connected[0] and retry_until is not None and time.monotonic()<retry_until and not self.stop.is_set() and retryable_connect_error(e):
+    self.record_connection('Connection attempt failed ('+str(e)+'); retrying')
+    with self.lock:self.state={'connection':'Connecting','connect_note':CONNECT_RETRY_NOTE}
+    return True
    self.record_connection('Connection ended: '+str(e))
    with self.lock:
     previous=self.controls.pending;self.controls.lost()
@@ -258,6 +281,7 @@ class Monitor:
      previous=self.controls.pending;self.controls.lost()
      if previous:self.trace_command('uncertain' if self.controls.uncertain else 'cancelled',previous,self.controls.message)
      self.state={**self.state,'connection':'Disconnected'}
+  return False
 
 class Handler(BaseHTTPRequestHandler):
  def setup(self):

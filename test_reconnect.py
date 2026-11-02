@@ -1,5 +1,5 @@
 """Regressions for session closure and startup timing; amplifier socket mocked."""
-import socket,unittest
+import errno,socket,unittest
 from contextlib import contextmanager
 from unittest.mock import patch
 from live import Monitor
@@ -47,3 +47,43 @@ class ReconnectTests(unittest.TestCase):
   with patch('live.amplifier_session',session_only),patch('live.time.monotonic',side_effect=lambda:clock[0]):monitor.run()
   self.assertEqual(monitor.snapshot()['connection'],'Disconnected')
   self.assertIn('No amplifier data',monitor.snapshot()['error'])
+
+class ConnectRetryTests(unittest.TestCase):
+ """First-launch macOS Local Network prompts make the first TCP connects fail; retry those, only those."""
+ def run_with(self,errors,retry_seconds=60):
+  monitor=Monitor(allow_hardware=True,read_only=True);calls=[];states=[];wire=FakeSocket(monitor)
+  def connect(*args,**kwargs):
+   calls.append(1);states.append(monitor.snapshot())
+   if len(calls)<=len(errors):raise errors[len(calls)-1]
+   return wire
+  with patch('session_protocol.socket.create_connection',side_effect=connect),patch('live.CONNECT_RETRY_DELAY',0.01),patch('live.CONNECT_RETRY_SECONDS',retry_seconds):monitor.run()
+  return monitor,calls,states,wire
+ def test_unreachable_then_allowed_connects_without_a_restart(self):
+  errors=[OSError(errno.EHOSTUNREACH,'No route to host'),OSError(errno.EHOSTUNREACH,'No route to host'),socket.timeout('timed out')]
+  monitor,calls,states,wire=self.run_with(errors)
+  self.assertEqual(len(calls),4);self.assertIn(b'C',wire.sent)
+  self.assertEqual(states[1]['connection'],'Connecting');self.assertIn('Local Network',states[1]['connect_note'])
+  self.assertNotIn('error',states[1]);self.assertNotEqual(monitor.snapshot().get('error'),'No route to host')
+ def test_refused_and_timed_out_are_also_retried(self):
+  self.assertEqual(len(self.run_with([ConnectionRefusedError(errno.ECONNREFUSED,'refused'),TimeoutError()])[1]),3)
+ def test_other_errors_are_not_retried(self):
+  for error in (OSError(errno.EACCES,'Permission denied'),ConnectionError('Amplifier did not enter the remote session'),ValueError('bad')):
+   monitor,calls,_,_=self.run_with([error]);self.assertEqual(len(calls),1,error);self.assertEqual(monitor.snapshot()['connection'],'Disconnected');self.assertEqual(monitor.snapshot()['error'],str(error))
+ def test_gives_up_after_the_retry_window(self):
+  monitor,calls,_,_=self.run_with([OSError(errno.EHOSTUNREACH,'No route to host')]*5,retry_seconds=0)
+  self.assertEqual(len(calls),1);self.assertEqual(monitor.snapshot()['connection'],'Disconnected');self.assertIn('No route to host',monitor.snapshot()['error'])
+ def test_disconnect_during_the_wait_stops_retrying(self):
+  monitor=Monitor(allow_hardware=True,read_only=True);calls=[]
+  def connect(*args,**kwargs):
+   calls.append(1);monitor.stop.set();raise OSError(errno.EHOSTUNREACH,'No route to host')
+  with patch('session_protocol.socket.create_connection',side_effect=connect),patch('live.CONNECT_RETRY_DELAY',0.01):monitor.run()
+  self.assertEqual(len(calls),1);self.assertEqual(monitor.snapshot()['connection'],'Disconnected')
+ def test_a_session_that_ended_after_connecting_is_not_retried(self):
+  monitor=Monitor(allow_hardware=True,read_only=True);calls=[]
+  class DropSocket(FakeSocket):
+   def recv(self,n):raise OSError(errno.ETIMEDOUT,'timed out after connecting')
+  def connect(*args,**kwargs):calls.append(1);return DropSocket(monitor)
+  with patch('session_protocol.socket.create_connection',side_effect=connect),patch('live.CONNECT_RETRY_DELAY',0.01):monitor.run()
+  self.assertEqual(len(calls),1);self.assertEqual(monitor.snapshot()['connection'],'Disconnected')
+
+if __name__=='__main__':unittest.main()
