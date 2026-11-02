@@ -105,5 +105,19 @@ class MonitorTests(unittest.TestCase):
     monitor.simulator.inject('WG11');alert=self.wait(monitor,lambda s:s.get('alert'));self.assertEqual(alert['alert']['kind'],'warning')
    finally:monitor.disconnect();monitor.thread.join(4)
  def test_3501a_monitor_reports_no_simulator_extras(self):
-  monitor=Monitor(simulate=True);monitor.settings['model']='OM-3501A';self.assertEqual(monitor.snapshot()['sim_features'],[])
+  monitor=Monitor(simulate=True);monitor.settings['model']='OM-3501A';monitor.simulator=simulator_for('OM-3501A');self.assertEqual(monitor.snapshot()['sim_features'],[])
+class ModelOptionTests(unittest.TestCase):
+ def test_simulation_model_option(self):
+  from live import simulation_model
+  cur={'host':'simulation','port':10001,'model':'OM-3501A','callsign':'','auto_connect':False,'secondary_measurement':'reflected','share_dxc':False}
+  self.assertEqual(simulation_model('om-4001a',False,cur),'OM-4001A');self.assertEqual(simulation_model('OM-3501A',False,cur),'OM-3501A')
+  with self.assertRaises(ValueError):simulation_model('OM-4001A',True,cur)
+  with self.assertRaises(ValueError):simulation_model('x'*41,False,cur)
+  with self.assertRaises(ValueError):simulation_model('',False,cur)
+ def test_extra_simulator_controls_stay_hidden_when_unsupported(self):
+  from pathlib import Path
+  html=Path(__file__).with_name('live.html').read_text(encoding='utf-8')
+  # connectRow sets display:flex, which would override the hidden attribute without this rule.
+  self.assertLess(html.index('.connectRow[hidden]{display:none}'),html.index('.connectRow{display:flex'))
+  self.assertIn('id="simExtras" hidden',html)
 if __name__=='__main__':unittest.main()

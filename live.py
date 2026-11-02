@@ -25,6 +25,11 @@ RETRY_ERRNOS=frozenset((errno.EHOSTUNREACH,errno.ENETUNREACH,errno.ETIMEDOUT,err
 def retryable_connect_error(error):
  return isinstance(error,(socket.timeout,TimeoutError)) or (isinstance(error,OSError) and error.errno in RETRY_ERRNOS)
 
+def simulation_model(model,hardware,current):
+ """Validated model label for the --model option, which only applies to the offline simulator."""
+ if hardware:raise ValueError('--model only applies to --simulate; set the model in Connection & station')
+ return settings.validate({**current,'model':model})['model']
+
 def alert_age(state,now):
  """Return the active alert and seconds since it was last received, or (None, None) once expired."""
  alert=state.get('alert')
@@ -102,7 +107,12 @@ class Monitor:
   with self.lock:self.connection_history.append({'time':round(time.time(),3),'event':event})
  def trace_decoded(self,decoder,stage='stream'):
   if self.trace is not None:self.trace.record('decoded',stage=stage,tokens=decoder.tokens,buffer_bytes=len(decoder.buffer),measurement_revision=decoder.measurement_revision,transmitting=decoder.state.get('transmitting'),rf_idle_confirmed=decoder.state.get('rf_idle_confirmed'),rf_idle_source=decoder.state.get('rf_idle_source'),autotune_phase=decoder.state.get('autotune_phase'))
+ def settle(self):
+  """Let a session that is closing finish, so settings and a new connection do not race its shutdown."""
+  thread=self.thread
+  if thread and self.stop.is_set() and thread is not threading.current_thread():thread.join(2)
  def connect(self):
+  self.settle()
   with self.lock:
    if not self.simulate and not self.allow_hardware:raise ValueError('Hardware access is disabled. Explicit operator approval is required before launching with --hardware.')
    if self.thread and self.thread.is_alive():return
@@ -117,6 +127,7 @@ class Monitor:
     self.simulator=simulator_for(self.settings.get('model'))
    self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
  def configure(self,value):
+  self.settle()
   with self.lock:
    value=settings.validate({**self.settings,**value})
    active=self.thread and self.thread.is_alive()
@@ -355,6 +366,7 @@ def create_server(monitor,port=0,preferences=None):
 def main():
  p=argparse.ArgumentParser();p.add_argument('--port',type=int,default=51851)
  mode=p.add_mutually_exclusive_group();mode.add_argument('--simulate',action='store_true');mode.add_argument('--hardware',action='store_true',help='Enable real amplifier access only after explicit operator approval');mode.add_argument('--read-only',action='store_true',help='Real telemetry only; operating and tuning commands blocked')
+ p.add_argument('--model',metavar='MODEL',help='Amplifier model label for --simulate, e.g. OM-4001A')
  p.add_argument('--trace',metavar='FILE',help='Save private raw amplifier replies and decoder events to a new JSONL file (hardware modes only)')
  a=p.parse_args()
  hardware=a.hardware or a.read_only
@@ -367,6 +379,9 @@ def main():
   from wire_trace import WireTrace
   trace=WireTrace(a.trace)
  server=create_server(Monitor(simulate=not hardware,allow_hardware=hardware,read_only=a.read_only,trace=trace),a.port)
+ if a.model:
+  try:server.monitor.settings['model']=simulation_model(a.model,hardware,server.monitor.settings)
+  except ValueError as exc:p.error(str(exc))
  from dxc_feed import start as start_dxc_feed
  try:feed=start_dxc_feed(server.monitor) if a.hardware and not a.read_only else None
  except OSError:feed=None

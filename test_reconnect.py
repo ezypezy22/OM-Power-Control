@@ -48,6 +48,25 @@ class ReconnectTests(unittest.TestCase):
   self.assertEqual(monitor.snapshot()['connection'],'Disconnected')
   self.assertIn('No amplifier data',monitor.snapshot()['error'])
 
+class SettleTests(unittest.TestCase):
+ def test_settings_and_reconnect_wait_for_a_closing_session(self):
+  import threading,time
+  with patch('live.settings.save',side_effect=lambda value:value):self.settle_waits()
+ def settle_waits(self):
+  import threading,time
+  monitor=Monitor(simulate=True);monitor.stop.set();release=threading.Event()
+  monitor.thread=threading.Thread(target=release.wait);monitor.thread.start()
+  threading.Timer(.3,release.set).start();started=time.monotonic()
+  monitor.configure({'model':'OM-4001A'})
+  self.assertGreaterEqual(time.monotonic()-started,.25);self.assertFalse(monitor.thread.is_alive());self.assertEqual(monitor.settings['model'],'OM-4001A')
+ def test_a_running_session_still_blocks_a_model_change(self):
+  import threading
+  with patch('live.settings.save',side_effect=lambda value:value):
+   monitor=Monitor(simulate=True);monitor.settings['model']='OM-3501A';release=threading.Event();monitor.thread=threading.Thread(target=release.wait);monitor.thread.start()
+   try:
+    with self.assertRaisesRegex(ValueError,'Disconnect before changing'):monitor.configure({'model':'OM-4001A'})
+   finally:release.set();monitor.thread.join()
+
 class ConnectRetryTests(unittest.TestCase):
  """First-launch macOS Local Network prompts make the first TCP connects fail; retry those, only those."""
  def run_with(self,errors,retry_seconds=60):

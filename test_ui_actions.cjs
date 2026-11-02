@@ -47,5 +47,13 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
  await nodes.simPowerOn.onclick();assert.deepEqual(posts.at(-1).body,{power:true});assert.equal(nodes.simExtraState.textContent,'Sent: PA on');await nodes.simPowerOff.onclick();assert.deepEqual(posts.at(-1).body,{power:false});assert.equal(posts.length,before+3);
  state={...state,sim_features:[]};await vm.runInContext('refresh()',ctx);assert.equal(nodes.simExtras.hidden,true);
  state={...state,simulated:false,sim_features:undefined};await vm.runInContext('refresh()',ctx);assert.equal(nodes.simExtras.hidden,true);
+ // Simulated model picker: disconnect, wait for it, save the model, reconnect.
+ {
+  const seen=posts.length;state={...state,simulated:true,connection:'Disconnected',settings:{...state.settings,model:'OM-3501A'}};
+  node('simModel').value='OM-4001A';await nodes.simModel.onchange();
+  assert.deepEqual(posts.slice(seen).map(p=>p.path),['/disconnect','/settings','/connect']);assert.deepEqual(posts[seen+1].body,{model:'OM-4001A'});assert.equal(nodes.simModelState.textContent,'Model: OM-4001A');
+  ctx.fetch=async(path,options)=>{if(options?.method==='POST')return {ok:false,json:async()=>({error:'Disconnect before changing amplifier address, port or model'})};return {ok:true,json:async()=>state}};
+  await nodes.simModel.onchange();assert.match(nodes.simModelState.textContent,/Disconnect before changing/);
+ }
  console.log('Actual UI handlers: toggle skips prompt; power confirmations retained; RF guard and callsign badge pass');
 })().catch(e=>{console.error(e);process.exitCode=1});
