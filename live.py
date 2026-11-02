@@ -9,6 +9,7 @@ SLOW_FIELDS=('plate_a','plate_v','screen_v','heater_a_v','heater_b_v','mains_v',
 ALERT_TTL={'warning':30,'limit':30,'hard_fault':5,'hv_fault':None,'soft_start':60}
 FAULT_KINDS=('hard_fault','hv_fault')
 EXTRA_FIELDS=(*SLOW_FIELDS,'screen_ma','frequency_khz')
+HELD_FIELDS=(*SLOW_FIELDS,'frequency_khz')
 from controls import Controls
 import settings
 from profiles import profile as model_profile
@@ -69,10 +70,15 @@ class Monitor:
    s.update(forward=0,reflected=0,swr=None,input=0)
   elif measurement_age>3:
    s.update(forward=None,reflected=None,swr=None,input=None)
+  s['model_profile']=model_profile(s.get('settings',{}).get('model'))
+  # Profiles that hold slow readings keep the last value while the link is up or merely delayed.
+  # RF-derived values (screen_ma) never hold, so the transmit guard keeps its strict timeout.
+  hold=s['model_profile'].get('hold_slow_readings') is True and s['connection'] in ('Connected','Stale')
   for key in EXTRA_FIELDS:
+   if hold and key in HELD_FIELDS:continue
    limit=12 if key=='frequency_khz' else 3
    if s['connection']!='Connected' or now-field_times.get(key,0)>limit:s[key]=None
-  s['model_profile']=model_profile(s.get('settings',{}).get('model'))
+  if s['model_profile'].get('grid_b_sign')==-1 and s.get('grid_b_v') is not None:s['grid_b_v']=-s['grid_b_v']
   s['alert'],s['alert_age_seconds']=alert_age({**s,'_field_times':field_times},now)
   s['grid_v']=s['grid_a_v']-s['grid_b_v'] if s.get('grid_a_v') is not None and s.get('grid_b_v') is not None else None
   if s.get('forward') is None or s.get('input') is None:s['gain_db']=None
@@ -314,12 +320,18 @@ def create_server(monitor,port=0,preferences=None):
 def main():
  p=argparse.ArgumentParser();p.add_argument('--port',type=int,default=51851)
  mode=p.add_mutually_exclusive_group();mode.add_argument('--simulate',action='store_true');mode.add_argument('--hardware',action='store_true',help='Enable real amplifier access only after explicit operator approval');mode.add_argument('--read-only',action='store_true',help='Real telemetry only; operating and tuning commands blocked')
+ p.add_argument('--trace',metavar='FILE',help='Save private raw amplifier replies and decoder events to a new JSONL file (hardware modes only)')
  a=p.parse_args()
  hardware=a.hardware or a.read_only
  from instance_lock import InstanceLock,READER_MUTEX
  if not hardware:os.environ.setdefault('OM_SETTINGS_PATH',str(settings.data_directory()/'simulation-settings.json'))
  lock=InstanceLock(settings.data_directory()/'instance.lock',name=READER_MUTEX)
- server=create_server(Monitor(simulate=not hardware,allow_hardware=hardware,read_only=a.read_only),a.port)
+ trace=None
+ if a.trace:
+  if not hardware:p.error('--trace needs --read-only or --hardware')
+  from wire_trace import WireTrace
+  trace=WireTrace(a.trace)
+ server=create_server(Monitor(simulate=not hardware,allow_hardware=hardware,read_only=a.read_only,trace=trace),a.port)
  from dxc_feed import start as start_dxc_feed
  try:feed=start_dxc_feed(server.monitor) if a.hardware and not a.read_only else None
  except OSError:feed=None
@@ -334,4 +346,5 @@ def main():
   if server.monitor.thread:server.monitor.thread.join(4)
   if feed:feed.shutdown();feed.server_close()
   server.server_close();lock.close()
+  if trace:trace.close()
 if __name__=='__main__':main()

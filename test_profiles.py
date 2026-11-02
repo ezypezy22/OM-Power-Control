@@ -25,4 +25,32 @@ class Tests(unittest.TestCase):
   p=m.snapshot()['model_profile'];self.assertEqual((p['full_scale_w'],p['controls_verified']),(5000,False))
  def test_3501a_controls_still_accepted(self):
   m=self.monitor('OM-3501A');m.command('toggle','request-3501a',expected_mode='Standby');self.assertTrue(m.controls.pending)
+class GridSignTests(unittest.TestCase):
+ def snapshot(self,model,**fields):
+  m=Monitor(simulate=True);m.settings['model']=model;now=time.monotonic()
+  m.state={'connection':'Connected','_received':now,'_field_times':{k:now for k in fields},**fields};return m.snapshot()
+ def test_4001a_grid_b_is_shown_with_the_vendor_sign(self):
+  s=self.snapshot('OM-4001A',grid_a_v=141.0,grid_b_v=141.0);self.assertEqual((s['grid_a_v'],s['grid_b_v']),(141.0,-141.0))
+  self.assertEqual(self.snapshot('OM-4001A',grid_a_v=141.0,grid_b_v=-3.0)['grid_b_v'],3.0)
+ def test_missing_or_other_models_are_not_flipped(self):
+  self.assertIsNone(self.snapshot('OM-4001A',grid_a_v=141.0).get('grid_b_v'))
+  s=self.snapshot('OM-3501A',grid_a_v=75.0,grid_b_v=150.0);self.assertEqual((s['grid_b_v'],s['grid_v']),(150.0,-75.0))
+class HoldTests(unittest.TestCase):
+ OLD=-20.0
+ def snapshot(self,model,connection='Connected',**fields):
+  m=Monitor(simulate=True);m.settings['model']=model;now=time.monotonic()
+  m.state={'connection':connection,'_received':now if connection=='Connected' else now-10,'_field_times':{k:self.OLD for k in fields},**fields};return m.snapshot()
+ def test_4001a_holds_old_slow_readings_while_connected_or_delayed(self):
+  for connection in ('Connected','Stale'):
+   s=self.snapshot('OM-4001A',connection,plate_v=3250.0,screen_v=19.0,heater_a_v=9.0,mains_v=242.0,temperature_c=31.0,frequency_khz=14078,grid_a_v=141.0)
+   self.assertEqual((s['plate_v'],s['screen_v'],s['heater_a_v'],s['mains_v'],s['temperature_c'],s['frequency_khz'],s['grid_a_v']),(3250.0,19.0,9.0,242.0,31.0,14078,141.0),connection)
+ def test_4001a_does_not_hold_rf_derived_values_or_after_disconnect(self):
+  self.assertIsNone(self.snapshot('OM-4001A',screen_ma=12.0,plate_v=3250.0)['screen_ma'])
+  s=self.snapshot('OM-4001A','Disconnected',plate_v=3250.0,frequency_khz=14078);self.assertIsNone(s['plate_v']);self.assertIsNone(s['frequency_khz'])
+ def test_3501a_and_unknown_models_still_blank_old_readings(self):
+  for model in ('OM-3501A','OM-9999'):
+   s=self.snapshot(model,plate_v=3250.0,frequency_khz=14078);self.assertIsNone(s['plate_v']);self.assertIsNone(s['frequency_khz'])
+ def test_fresh_readings_are_unchanged(self):
+  m=Monitor(simulate=True);m.settings['model']='OM-3501A';now=time.monotonic()
+  m.state={'connection':'Connected','_received':now,'_field_times':{'plate_v':now},'plate_v':3250.0};self.assertEqual(m.snapshot()['plate_v'],3250.0)
 if __name__=='__main__':unittest.main()
