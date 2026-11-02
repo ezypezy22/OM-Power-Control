@@ -41,6 +41,7 @@ class SimulatedAmplifier:
     self.emit({'Operate':b'ST1110- SIMULATED ANTENNA;','Standby':b'ST1100- SIMULATED ANTENNA;','Off':b'ST2000- SIMULATED ANTENNA;','Warming up':b'WA3;','Cooling down':b'CO3;'}[self.mode])
     if not self.rf:self.emit(b'PTTOFF;')
    elif data==b'F':self.emit(b'FR14078;')
+   elif data==b'1':self.emit(b'INFO:0001,0000001,0,03.21,60,OM3501A;')
    elif data==b'#':
     self.emit(b'IP850;UP2900;US300;UGA75;UGB150;UHA12;UHB12;UM240;TE64;')
     if self.rf:
@@ -138,6 +139,7 @@ class Simulated4001A(SimulatedAmplifier):
                     forward=1700 if self.phase=='tuning' else 2400
                     self.emit(b'='+forward.to_bytes(2,'little')+bytes([5,20,2,0,0,0])+b';')
             elif data==b'F':self.sent.append(data);self.advance();self.emit(b'FR18100;')
+            elif data==b'1':self.sent.append(data);self.advance();self.emit(b'INFO:0001,0000001,0000002,03.42,55756,OM4001A;')
             elif data==b'Y':
                 self.sent.append(data);self.advance()
                 if self.mode=='Off':self._start_warmup()

@@ -20,7 +20,7 @@ class ReconnectTests(unittest.TestCase):
   with patch('session_protocol.socket.create_connection',return_value=wire):monitor.run()
   self.assertEqual(monitor.snapshot()['connection'],'Disconnected')
   self.assertIn('remote session closed',monitor.snapshot().get('error','').lower())
-  self.assertTrue(set(wire.sent)<={b'C',b'?',b'#',b'F'})
+  self.assertTrue(set(wire.sent)<={b'C',b'?',b'#',b'F',b'1'})
  def test_slow_setup_does_not_spend_the_data_timeout(self):
   monitor=Monitor(allow_hardware=True,read_only=True);clock=[0.0]
   class SlowSocket:

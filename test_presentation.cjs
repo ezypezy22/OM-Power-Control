@@ -154,4 +154,15 @@ console.log('Selectable secondary-meter ranges and unavailable states pass');
  assert.equal(pres({...base,model_profile:{fresh_seconds:8}}).kind,'off');
  console.log('Per-model freshness presentation checks passed');
 }
+{
+ const {aboutAmplifier:about,formatOperatingTime:hm,formatFirmware:fw}=require('./presentation.js');
+ assert.equal(hm(55756),'929h 16m');assert.equal(hm(0),'0h 0m');assert.equal(hm(59),'0h 59m');assert.equal(hm(60),'1h 0m');assert.equal(hm(355),'5h 55m');
+ for(const bad of [undefined,null,NaN,-1,'x'])assert.equal(hm(bad),'—');
+ assert.equal(fw('03.42'),'3.42');assert.equal(fw('3.16'),'3.16');assert.equal(fw('03.05'),'3.05');for(const bad of [undefined,'garbage','3',''])assert.equal(fw(bad),'—');
+ const a=about({model:'OM4001A',serial:'2302',firmware:'03.42',operating_minutes:55756});
+ assert.equal(a.available,true);assert.deepEqual(a.rows,[['Type of PA','OM4001A'],['Amplifier serial no.','2302'],['PA firmware version','3.42'],['Operating time','929h 16m']]);
+ assert.equal(about({model:'OM3501A',firmware:'03.25',operating_minutes:5}).rows[1][1],'—');
+ for(const none of [null,undefined,{}]){assert.equal(about(none).available,false);assert.deepEqual(about(none).rows,[])}
+ console.log('About amplifier checks passed');
+}
 }

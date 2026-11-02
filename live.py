@@ -12,7 +12,7 @@ EXTRA_FIELDS=(*SLOW_FIELDS,'screen_ma','frequency_khz')
 HELD_FIELDS=(*SLOW_FIELDS,'frequency_khz')
 from controls import Controls
 import settings
-from profiles import profile as model_profile
+from profiles import profile as model_profile,resolve as resolve_profile
 from collections import deque
 from session_protocol import amplifier_session
 
@@ -69,7 +69,7 @@ class Monitor:
   s['sim_features']=list(self.simulator.FEATURES) if self.simulate and self.simulator else []
   s['tune_test']=self.tune_test;s['tune_test_counts']={k.decode('ascii'):v for k,v in self.tune_test_counts.copy().items()}
   s['autotune_age_seconds']=round(now-field_times.get('autotune',now),1)
-  profile=model_profile(s.get('settings',{}).get('model'))
+  profile,s['model_notice']=resolve_profile(s.get('settings',{}).get('model'),s.get('info'))
   if s['connection']=='Connected' and age>profile['fresh_seconds']:s['connection']='Stale'
   measurement_received=s.pop('_measurement',None)
   measurement_age=now-(measurement_received if measurement_received is not None else 0)
@@ -107,6 +107,9 @@ class Monitor:
   with self.lock:self.connection_history.append({'time':round(time.time(),3),'event':event})
  def trace_decoded(self,decoder,stage='stream'):
   if self.trace is not None:self.trace.record('decoded',stage=stage,tokens=decoder.tokens,buffer_bytes=len(decoder.buffer),measurement_revision=decoder.measurement_revision,transmitting=decoder.state.get('transmitting'),rf_idle_confirmed=decoder.state.get('rf_idle_confirmed'),rf_idle_source=decoder.state.get('rf_idle_source'),autotune_phase=decoder.state.get('autotune_phase'))
+ def profile_now(self):
+  """Profile in force: the model the amplifier reported, else the model label."""
+  return resolve_profile(self.settings.get('model','OM-3501A'),self.state.get('info'))[0]
  def settle(self):
   """Let a session that is closing finish, so settings and a new connection do not race its shutdown."""
   thread=self.thread
@@ -170,7 +173,7 @@ class Monitor:
      if not duplicate:
       if self.mode_test_sent>=2:raise ValueError('Operate/Standby test is complete; further commands are blocked')
       if expected_mode!=('Standby' if self.mode_test_sent==0 else 'Operate'):raise ValueError('Mode test requires Standby to Operate, then Operate to Standby')
-    if not model_profile(self.settings.get('model','OM-3501A'))['controls_verified']:raise ValueError('Monitoring only: controls are unverified for this model')
+    if not self.profile_now()['controls_verified']:raise ValueError('Monitoring only: controls are unverified for this model')
     duplicate=key in self.controls.seen if isinstance(key,str) else False
     self.controls.request(action,key,self.control_state(),expected_mode)
    except ValueError as exc:self.trace_command('rejected',pending,str(exc));raise
@@ -223,7 +226,7 @@ class Monitor:
     self.trace_decoded(dec,'handshake')
     # The data timeout starts when session setup completes, not before TCP/setup.
     received=time.monotonic()
-    sock.sendall(b'?')
+    sock.sendall(b'?');sock.sendall(b'1')   # 1: one INFO request (model, firmware, hours) per connection
     next_poll=0;next_frequency=0;next_status=time.monotonic()+2
     with self.lock:self.state={'connection':'Waiting for amplifier data','_received':received}
     while not self.stop.is_set():

@@ -23,6 +23,15 @@ function amplifierPresentation(s) {
  if(mode==='Off')return {kind:'off',title:'Amplifier off',detail:'Network listener connected'};
  return {kind:'waiting',title:'Awaiting mode confirmation',detail:mode==='On'?'Powered on · waiting for operating mode':'Connected · operating mode not yet reported'};
 }
+/* "About amplifier" rows from the INFO reply, worded as in the vendor client. */
+function formatOperatingTime(minutes){return Number.isFinite(minutes)&&minutes>=0?Math.floor(minutes/60)+'h '+(minutes%60)+'m':'—'}
+function formatFirmware(version){const m=/^(\d+)\.(\d+)$/.exec(String(version||''));return m?String(parseInt(m[1],10))+'.'+m[2]:'—'}
+function aboutAmplifier(info){
+ const available=!!info&&typeof info.model==='string';
+ return {available,rows:available?[['Type of PA',info.model],['Amplifier serial no.',info.serial||'—'],['PA firmware version',formatFirmware(info.firmware)],['Operating time',formatOperatingTime(info.operating_minutes)]]:[]};
+}
+if(typeof module!=='undefined')Object.assign(module.exports,{formatOperatingTime,formatFirmware,aboutAmplifier});
+
 /* Non-fault amplifier alerts (WGx/FAx warnings, soft-start error) shown beside, not instead of, the operating state. */
 function alertPresentation(s){
  const a=s.alert;

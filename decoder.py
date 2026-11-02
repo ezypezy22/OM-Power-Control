@@ -110,6 +110,7 @@ class Decoder:
                 elif token=='COON':self.state['status']='Cooling down';self.state.pop('cooling_temp_c',None)
                 elif re.fullmatch(r'CT\d+',token):self.state.update(status='Cooling down',cooling_temp_c=int(token[2:]));self.state.pop('countdown',None)
                 elif token in FAULT_TOKENS or re.fullmatch(r'(WG|FA)\d+',token):self.set_alert(token)
+                elif token.startswith('INFO:'):self.set_info(token)
                 elif re.fullmatch(r'(WA|CO)\d+',token):self.state.pop('cooling_temp_c',None);self.state.update(status='Warming up' if token[:2]=='WA' else 'Cooling down',countdown=int(token[2:]))
                 elif token in ('PTTON','PTTOFF'):
                     if token=='PTTOFF':self.confirm_rf_idle('ptt-off-message')
@@ -135,9 +136,21 @@ class Decoder:
                 if self.state.get('autotune_phase') in ('cancelled','aborted','unknown','defaults','stopped-exited') or self.state.get('status') in ('Standby','Off','Cooling down','Warming up'):
                     self._saved_tune_release=False
                 if token.startswith('AUTO'):self.mark('autotune')
-                self.state['last_status']=token
+                # INFO carries serial numbers; keep the raw text out of last_status.
+                self.state['last_status']='INFO' if token.startswith('INFO:') else token
             updates.append(dict(self.state))
         return updates
+
+    def set_info(self,token):
+        """INFO:sn,tube serial(s),...,firmware,minutes,type; (OM-3501A: sn,tube,0,... OM-4001A: sn,tube1,tube2,...)
+        Keeps the amplifier serial for the About panel; the tube serials are not kept."""
+        parts=[p.strip() for p in token[5:].split(',')]
+        if len(parts)!=6:return
+        serial,version,minutes,model=parts[0],parts[3],parts[4],parts[5]
+        if not re.fullmatch(r'\d{1,3}\.\d{1,3}',version) or not minutes.isdecimal() or not re.fullmatch(r'[A-Za-z0-9+\- ]{1,20}',model):return
+        info={'model':model,'firmware':version,'operating_minutes':int(minutes)}
+        if re.fullmatch(r'[A-Za-z0-9\- ]{1,20}',serial):info['serial']=serial
+        self.state['info']=info;self.mark('info')
 
     def set_alert(self,token):
         if token in FAULT_TOKENS:kind,text=FAULT_TOKENS[token];code=None

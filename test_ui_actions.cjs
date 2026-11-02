@@ -55,5 +55,12 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
   ctx.fetch=async(path,options)=>{if(options?.method==='POST')return {ok:false,json:async()=>({error:'Disconnect before changing amplifier address, port or model'})};return {ok:true,json:async()=>state}};
   await nodes.simModel.onchange();assert.match(nodes.simModelState.textContent,/Disconnect before changing/);
  }
+ // About amplifier panel and model notice.
+ state={...state,simulated:false,info:{model:'OM4001A',serial:'2302',firmware:'03.42',operating_minutes:55756},model_notice:''};await vm.runInContext('refresh()',ctx);
+ for(const text of ['Type of PA','OM4001A','Amplifier serial no.','2302','PA firmware version','3.42','Operating time','929h 16m'])assert.ok(nodes.aboutRows.innerHTML.includes('>'+text+'<'),text);
+ assert.equal(nodes.modelNotice.hidden,true);
+ state={...state,info:{model:'<b>X</b>',firmware:'03.42',operating_minutes:1},model_notice:'Amplifier reports X.'};await vm.runInContext('refresh()',ctx);
+ assert.ok(!nodes.aboutRows.innerHTML.includes('<b>'));assert.equal(nodes.modelNotice.hidden,false);assert.equal(nodes.modelNotice.textContent,'Amplifier reports X.');
+ state={...state,info:undefined,model_notice:''};await vm.runInContext('refresh()',ctx);assert.ok(nodes.aboutRows.innerHTML.includes('Available after connecting.'));assert.equal(nodes.modelNotice.hidden,true);
  console.log('Actual UI handlers: toggle skips prompt; power confirmations retained; RF guard and callsign badge pass');
 })().catch(e=>{console.error(e);process.exitCode=1});
