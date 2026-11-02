@@ -3,7 +3,7 @@ import copy,re
 
 # controls_verified: Operate/Standby, power and auto-tune were validated on hardware for this model.
 PROFILES={
- 'OM3501A':{'tube_labels':['A','B'],'grid_separate':False,'grid_b_sign':1,'hold_slow_readings':False,'name':'OM-3501A','full_scale_w':3500,'reflected_max_w':500,'input_max_w':100,'screen_ma_range':[-60,60],'controls_verified':True},
+ 'OM3501A':{'tube_labels':['A','B'],'grid_separate':False,'grid_b_sign':1,'hold_slow_readings':False,'screen_v_zero_while_warming':False,'name':'OM-3501A','full_scale_w':3500,'reflected_max_w':500,'input_max_w':100,'screen_ma_range':[-60,60],'controls_verified':True},
  # Protocol per the manufacturer's rev.4 document (OM4001A matches OM3501A apart from two-tube values).
  # Meter ranges match the vendor's own client; controls stay locked until validated on hardware.
  'OM4001A':{'name':'OM-4001A','full_scale_w':5000,'reflected_max_w':250,'input_max_w':100,'screen_ma_range':[-80,80],'controls_verified':False,
@@ -13,9 +13,11 @@ PROFILES={
   # The vendor client shows grid b with the opposite sign to the received UGB value (+141 received, -141 shown).
   'grid_b_sign':-1,
   # Keep the last slow reading on screen until the next one arrives (the vendor client does not blank it).
-  'hold_slow_readings':True},
+  'hold_slow_readings':True,
+  # The amp reports a constant US19 through warm-up (and in Standby); the vendor client shows 0 V while warming.
+  'screen_v_zero_while_warming':True},
 }
-DEFAULT={'tube_labels':['A','B'],'grid_separate':False,'grid_b_sign':1,'hold_slow_readings':False,'name':None,'full_scale_w':3500,'reflected_max_w':500,'input_max_w':100,'screen_ma_range':[-60,60],'controls_verified':False,'known':False}
+DEFAULT={'tube_labels':['A','B'],'grid_separate':False,'grid_b_sign':1,'hold_slow_readings':False,'screen_v_zero_while_warming':False,'name':None,'full_scale_w':3500,'reflected_max_w':500,'input_max_w':100,'screen_ma_range':[-60,60],'controls_verified':False,'known':False}
 
 def profile(model):
  """Profile for a model label; unknown models get the 3500 W scale and monitoring only."""

@@ -66,14 +66,17 @@ class Decoder:
                 token=self.buffer[:end].decode('ascii');self.buffer=self.buffer[end+1:]
                 self.tokens.append(token)
                 if token.startswith('ST') and token!='STBY':self.state['startup_status_reply']=token
-                status_match=re.fullmatch(r'ST(\d{4})-\s*(.*)',token)
+                # STxabcd: x is the antenna [0-9, A, F] (0: no antenna switch), a/b/c are PA on, operate and PTT.
+                status_match=re.fullmatch(r'ST([0-9AF]\d{3})-\s*(.*)',token)
                 if status_match:
                     code,name=status_match.groups()
                     self.state['antenna_name']=name.strip()[:80]
-                    self.state['antenna_number']=int(code[0]) if code[0] in '12' and code[1:] in ('100','110') else None
+                    tail=code[1:]
+                    self.state['antenna_number']={'A':10}.get(code[0],int(code[0]) if code[0] in '123456789' else None) if tail in ('100','110') else None
                     # ST1000 was observed with the TCP interface alive and the
-                    # operator confirming the PA was off (firmware 3.21).
-                    self.state['status']=('Operate' if code[1:]=='110' else 'Standby') if code[0] in '12' and code[1:] in ('100','110') else 'Off' if code in ('1000','2000') else 'Unknown'
+                    # operator confirming the PA was off (firmware 3.21); the protocol
+                    # document also gives ST0000 (no antenna switch) for PA off.
+                    self.state['status']='Operate' if tail=='110' else 'Standby' if tail=='100' else 'Off' if tail=='000' else 'Unknown'
                     self.state.pop('countdown',None);self.state.pop('cooling_temp_c',None)
                 if token=='AUTO':
                     self.state.pop('load_pct',None);self.state.pop('tune_pct',None)

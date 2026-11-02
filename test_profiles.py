@@ -53,4 +53,16 @@ class HoldTests(unittest.TestCase):
  def test_fresh_readings_are_unchanged(self):
   m=Monitor(simulate=True);m.settings['model']='OM-3501A';now=time.monotonic()
   m.state={'connection':'Connected','_received':now,'_field_times':{'plate_v':now},'plate_v':3250.0};self.assertEqual(m.snapshot()['plate_v'],3250.0)
+class ScreenWarmupTests(unittest.TestCase):
+ def snapshot(self,model,status,**fields):
+  m=Monitor(simulate=True);m.settings['model']=model;now=time.monotonic()
+  m.state={'connection':'Connected','_received':now,'status':status,'_field_times':{k:now for k in fields},**fields};return m.snapshot()
+ def test_4001a_shows_zero_screen_voltage_only_while_warming(self):
+  self.assertEqual(self.snapshot('OM-4001A','Warming up',screen_v=19.0,plate_v=1570.0)['screen_v'],0.0)
+  self.assertEqual(self.snapshot('OM-4001A','Warming up',screen_v=19.0,plate_v=1570.0)['plate_v'],1570.0)
+  for status in ('On','Standby','Operate','Cooling down','Off'):self.assertEqual(self.snapshot('OM-4001A',status,screen_v=19.0)['screen_v'],19.0,status)
+ def test_other_models_show_the_received_screen_voltage_while_warming(self):
+  for model in ('OM-3501A','OM-9999'):self.assertEqual(self.snapshot(model,'Warming up',screen_v=19.0)['screen_v'],19.0)
+ def test_unavailable_screen_voltage_stays_unavailable(self):
+  self.assertIsNone(self.snapshot('OM-4001A','Warming up',plate_v=1570.0).get('screen_v'))
 if __name__=='__main__':unittest.main()
