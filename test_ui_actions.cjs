@@ -40,5 +40,12 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
  assert.match(nodes.powerTicks.innerHTML,/>2\.5</);assert.match(nodes.auxTicks.innerHTML,/\+80 mA/);
  state={...state,model_profile:undefined};await vm.runInContext('refresh()',ctx);
  assert.equal(nodes.keycell_grid_v.hidden,false);assert.equal(nodes.keycell_grid_a_v.hidden,true);assert.equal(nodes.keylabel_grid_a_v.textContent,'Ugrid A');assert.equal(nodes.keylabel_heater_b_v.textContent,'Uheat B');assert.match(nodes.powerTicks.innerHTML,/3,500 W/);
+ // Simulator extras appear only when the simulator supports them.
+ const before=posts.length;
+ state={...state,simulated:true,sim_features:['power','alert']};await vm.runInContext('refresh()',ctx);assert.equal(nodes.simExtras.hidden,false);
+ node('simAlert').value='HF';await nodes.simAlertSend.onclick();assert.deepEqual(posts.at(-1).body,{alert:'HF'});assert.equal(posts.at(-1).path,'/simulation');
+ await nodes.simPowerOn.onclick();assert.deepEqual(posts.at(-1).body,{power:true});await nodes.simPowerOff.onclick();assert.deepEqual(posts.at(-1).body,{power:false});assert.equal(posts.length,before+3);
+ state={...state,sim_features:[]};await vm.runInContext('refresh()',ctx);assert.equal(nodes.simExtras.hidden,true);
+ state={...state,simulated:false,sim_features:undefined};await vm.runInContext('refresh()',ctx);assert.equal(nodes.simExtras.hidden,true);
  console.log('Actual UI handlers: toggle skips prompt; power confirmations retained; RF guard and callsign badge pass');
 })().catch(e=>{console.error(e);process.exitCode=1});

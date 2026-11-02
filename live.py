@@ -54,13 +54,14 @@ class Monitor:
   self.trace=trace
   if tune_test:self.settings['share_dxc']=False
   if simulate:
-   from simulator import SimulatedAmplifier
-   self.simulator=SimulatedAmplifier();self.settings.update(host='simulation',auto_connect=False,share_dxc=False)
+   from simulator import simulator_for
+   self.simulator=simulator_for(self.settings.get('model'));self.settings.update(host='simulation',auto_connect=False,share_dxc=False)
  def snapshot(self):
   with self.lock:s={**self.state,'simulated':self.simulate,'read_only':self.read_only,'mode_test':self.mode_test,'mode_test_sent':self.mode_test_sent,'power_test':self.power_test,'power_test_sent':self.power_test_sent,'readiness_test':self.readiness_test,'readiness_test_sent':self.readiness_test_sent,'control':self.controls.view(),'settings':dict(self.settings),'connection_history':list(self.connection_history),'command_history':list(self.command_history)}
   field_times=s.pop('_field_times',{})
   now=time.monotonic();age=now-s.pop('_received',now)
   s['age_seconds']=round(age,1)
+  s['sim_features']=list(self.simulator.FEATURES) if self.simulate and self.simulator else []
   s['tune_test']=self.tune_test;s['tune_test_counts']={k.decode('ascii'):v for k,v in self.tune_test_counts.copy().items()}
   s['autotune_age_seconds']=round(now-field_times.get('autotune',now),1)
   profile=model_profile(s.get('settings',{}).get('model'))
@@ -112,8 +113,8 @@ class Monitor:
    if not self.settings['host']:raise ValueError('Set and save the amplifier address before connecting')
    self.stop.clear();self.controls=Controls();self.state={'connection':'Connecting'}
    if self.simulate:
-    from simulator import SimulatedAmplifier
-    self.simulator=SimulatedAmplifier()
+    from simulator import simulator_for
+    self.simulator=simulator_for(self.settings.get('model'))
    self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
  def configure(self,value):
   with self.lock:
@@ -317,7 +318,12 @@ class Handler(BaseHTTPRequestHandler):
     size=int(self.headers.get('Content-Length','0'))
     if not 0<size<=1024:raise ValueError('Invalid simulation input size')
     value=json.loads(payload)
-    self.server.monitor.simulator.set_input(value['rf'],value.get('scenario','success'))
+    simulator=self.server.monitor.simulator
+    if 'power' in value:
+     if type(value['power']) is not bool:raise ValueError('Invalid simulation input')
+     simulator.set_power(value['power'])
+    elif 'alert' in value:simulator.inject(value['alert'])
+    else:simulator.set_input(value['rf'],value.get('scenario','success'))
    except (ValueError,TypeError,KeyError) as e:
     self.send(409,json.dumps({'error':str(e)}).encode());return
   elif self.path in ('/settings','/display-settings'):
