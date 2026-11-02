@@ -65,4 +65,21 @@ class ScreenWarmupTests(unittest.TestCase):
   for model in ('OM-3501A','OM-9999'):self.assertEqual(self.snapshot(model,'Warming up',screen_v=19.0)['screen_v'],19.0)
  def test_unavailable_screen_voltage_stays_unavailable(self):
   self.assertIsNone(self.snapshot('OM-4001A','Warming up',plate_v=1570.0).get('screen_v'))
+class FreshnessAndOffTests(unittest.TestCase):
+ def snapshot(self,model,status='Standby',age=0.0,**fields):
+  m=Monitor(simulate=True);m.settings['model']=model;now=time.monotonic()
+  m.state={'connection':'Connected','_received':now-age,'status':status,'_field_times':{k:now for k in fields},**fields};return m.snapshot()
+ def test_4001a_tolerates_the_amps_slow_poll_replies_before_calling_the_link_delayed(self):
+  for age in (3.5,4.4,7.5):self.assertEqual(self.snapshot('OM-4001A',age=age)['connection'],'Connected',age)
+  self.assertEqual(self.snapshot('OM-4001A',age=9.0)['connection'],'Stale')
+  self.assertEqual(self.snapshot('OM-4001A',age=2.0)['model_profile']['fresh_seconds'],8)
+ def test_other_models_keep_the_three_second_limit(self):
+  for model in ('OM-3501A','OM-9999'):
+   self.assertEqual(self.snapshot(model,age=2.9)['connection'],'Connected');self.assertEqual(self.snapshot(model,age=3.5)['connection'],'Stale')
+ def test_4001a_grid_voltages_read_zero_while_off_only(self):
+  s=self.snapshot('OM-4001A','Off',grid_a_v=139.0,grid_b_v=139.0);self.assertEqual((s['grid_a_v'],s['grid_b_v']),(0.0,0.0));self.assertEqual(repr(s['grid_b_v']),'0.0')
+  for status in ('Warming up','On','Standby','Operate','Cooling down'):
+   s=self.snapshot('OM-4001A',status,grid_a_v=128.0,grid_b_v=128.0);self.assertEqual((s['grid_a_v'],s['grid_b_v']),(128.0,-128.0),status)
+  self.assertEqual(self.snapshot('OM-3501A','Off',grid_a_v=75.0,grid_b_v=150.0)['grid_b_v'],150.0)
+  self.assertIsNone(self.snapshot('OM-4001A','Off',grid_a_v=139.0).get('grid_b_v'))
 if __name__=='__main__':unittest.main()

@@ -63,7 +63,8 @@ class Monitor:
   s['age_seconds']=round(age,1)
   s['tune_test']=self.tune_test;s['tune_test_counts']={k.decode('ascii'):v for k,v in self.tune_test_counts.copy().items()}
   s['autotune_age_seconds']=round(now-field_times.get('autotune',now),1)
-  if s['connection']=='Connected' and age>3:s['connection']='Stale'
+  profile=model_profile(s.get('settings',{}).get('model'))
+  if s['connection']=='Connected' and age>profile['fresh_seconds']:s['connection']='Stale'
   measurement_received=s.pop('_measurement',None)
   measurement_age=now-(measurement_received if measurement_received is not None else 0)
   # Fresh temperatures/status do not refresh an old RF-active indication.
@@ -79,7 +80,7 @@ class Monitor:
    s.update(forward=0,reflected=0,swr=None,input=0)
   elif measurement_age>3:
    s.update(forward=None,reflected=None,swr=None,input=None)
-  s['model_profile']=model_profile(s.get('settings',{}).get('model'))
+  s['model_profile']=profile
   # Profiles that hold slow readings keep the last value while the link is up or merely delayed.
   # RF-derived values (screen_ma) never hold, so the transmit guard keeps its strict timeout.
   hold=s['model_profile'].get('hold_slow_readings') is True and s['connection'] in ('Connected','Stale')
@@ -89,6 +90,9 @@ class Monitor:
    if s['connection']!='Connected' or now-field_times.get(key,0)>limit:s[key]=None
   if s['model_profile'].get('grid_b_sign')==-1 and s.get('grid_b_v') is not None:s['grid_b_v']=-s['grid_b_v']
   if s['model_profile'].get('screen_v_zero_while_warming') is True and s.get('status')=='Warming up' and s.get('screen_v') is not None:s['screen_v']=0.0
+  if profile.get('grid_zero_when_off') is True and s.get('status')=='Off':
+   for key in ('grid_a_v','grid_b_v'):
+    if s.get(key) is not None:s[key]=0.0
   s['alert'],s['alert_age_seconds']=alert_age({**s,'_field_times':field_times},now)
   s['grid_v']=s['grid_a_v']-s['grid_b_v'] if s.get('grid_a_v') is not None and s.get('grid_b_v') is not None else None
   if s.get('forward') is None or s.get('input') is None:s['gain_db']=None

@@ -146,4 +146,12 @@ console.log('Selectable secondary-meter ranges and unavailable states pass');
  assert.equal(conn({connection:'Connecting',connect_note:note,settings:{host:'h',port:1}}).detail,note);assert.equal(conn({connection:'Connecting',settings:{host:'h',port:1}}).detail,'Opening amplifier connection');
  console.log('Connect wait note presentation checks passed');
 }
+{
+ const {freshSeconds:fresh,amplifierConnection:conn2,amplifierPresentation:pres}=require('./presentation.js');
+ assert.equal(fresh({}),3);assert.equal(fresh({model_profile:{fresh_seconds:8}}),8);assert.equal(fresh({model_profile:{fresh_seconds:0}}),3);
+ const base={connection:'Connected',status:'Off',settings:{host:'h',port:1},age_seconds:5};
+ assert.equal(conn2(base).kind,'stale');assert.equal(conn2({...base,model_profile:{fresh_seconds:8}}).kind,'live');assert.equal(conn2({...base,model_profile:{fresh_seconds:8},age_seconds:9}).kind,'stale');
+ assert.equal(pres({...base,model_profile:{fresh_seconds:8}}).kind,'off');
+ console.log('Per-model freshness presentation checks passed');
+}
 }

@@ -1,4 +1,7 @@
 /* Presentation only: never writes amplifier state or issues commands. */
+/* Seconds without data before the link counts as delayed; the model profile may allow longer (profiles.py). */
+function freshSeconds(s){const v=s&&s.model_profile&&s.model_profile.fresh_seconds;return v>0?v:3}
+if(typeof module!=='undefined')module.exports={freshSeconds};
 function amplifierPresentation(s) {
  const connection=s.connection||'Disconnected';
  if(connection==='Disconnecting')return {kind:'waiting',title:'Disconnecting',detail:'Closing amplifier communication session'};
@@ -26,7 +29,7 @@ function alertPresentation(s){
  if(!a||a.kind==='hard_fault'||a.kind==='hv_fault')return {visible:false,kind:'',text:''};
  return {visible:true,kind:a.kind,text:a.text};
 }
-if(typeof module!=='undefined')module.exports={amplifierPresentation,alertPresentation};
+if(typeof module!=='undefined')Object.assign(module.exports,{amplifierPresentation,alertPresentation});
 
 /* Operating commands need a model whose controls were validated on hardware (profiles.py). Without
    a server-supplied profile, fall back to the OM-3501A name check; whenUnknown covers a missing model. */
@@ -45,7 +48,7 @@ function amplifierControls(s,localPending=false){
  else if(s.read_only)reason='Read-only telemetry: operating and tuning commands are blocked.';
  else if(!controlsVerified(s,true))reason='Monitoring only: controls are unverified for this model.';
  else if(s.alert&&(s.alert.kind==='hard_fault'||s.alert.kind==='hv_fault'))reason='Amplifier fault active: commands are blocked. '+s.alert.text;
- else if(s.connection!=='Connected'||s.age_seconds>3)reason='Connect and wait for fresh amplifier data to use controls.';
+ else if(s.connection!=='Connected'||s.age_seconds>freshSeconds(s))reason='Connect and wait for fresh amplifier data to use controls.';
  else if(c.uncertain)reason='Command result is uncertain. Reconnect to reassess; no retry was sent.';
  else if(localPending||c.pending)reason='Waiting for amplifier confirmation…';
  else if(['entered','waiting','tuning','unknown','aborted'].includes(s.autotune_phase))reason='Automatic tuning active; use its controls below.';
@@ -66,7 +69,7 @@ function amplifierConnection(s){
  if(s.simulated)return {endpoint:'Offline simulator',kind:'simulation',badge:'SIMULATION',label:'Offline simulation',detail:'Synthetic readings only; no amplifier connection',error:''};
  const endpoint=s.settings?String(s.settings.host)+':'+String(s.settings.port):'';
  let state=s.connection||'Disconnected';
- if(state==='Connected'&&s.age_seconds>3)state='Stale';
+ if(state==='Connected'&&s.age_seconds>freshSeconds(s))state='Stale';
  let result={endpoint,kind:'offline',badge:'OFFLINE',label:'Disconnected',detail:'No amplifier connection',error:''};
  if(state==='Connected')result={...result,kind:'live',badge:'LIVE',label:'Connected',detail:'Receiving amplifier data'};
  else if(state==='Disconnecting')result={...result,kind:'waiting',badge:'CLOSING',label:'Disconnecting',detail:'Closing amplifier communication session'};
@@ -98,7 +101,7 @@ if(typeof module!=='undefined'){module.exports.forwardPowerClip=forwardPowerClip
 // Both readings describe the same mismatch. Color only fresh, active RF data.
 function mismatchColor(s){
  const neutral='#a5b2b6';
- if(s.connection!=='Connected'||s.age_seconds>3||s.transmitting!==true||
+ if(s.connection!=='Connected'||s.age_seconds>freshSeconds(s)||s.transmitting!==true||
     !Number.isFinite(s.forward)||s.forward<=0||!Number.isFinite(s.reflected)||s.reflected<0||
     !Number.isFinite(s.swr)||s.swr<1)return neutral;
  const stops=[[1,[121,213,179]],[1.5,[241,187,103]],[2,[229,103,88]]];
@@ -114,7 +117,7 @@ function auxiliaryMeter(s,profile=OM3501A_PROFILE){
  const range=s.model_profile?.screen_ma_range;
  const screen=profile===OM3501A_PROFILE;
  if(screen&&Array.isArray(range)&&range.length===2&&range[0]<range[1])profile={...profile,min:range[0],max:range[1]};
- const value=s[profile.key],valid=s.connection==='Connected'&&!(s.age_seconds>3)&&typeof value==='number'&&Number.isFinite(value);
+ const value=s[profile.key],valid=s.connection==='Connected'&&!(s.age_seconds>freshSeconds(s))&&typeof value==='number'&&Number.isFinite(value);
  const position=valid?100*(Math.max(profile.min,Math.min(profile.max,value))-profile.min)/(profile.max-profile.min):50;
  const sign=v=>v>0?'+'+v:v<0?'\u2212'+(-v):'0',step=s.model_profile?.screen_ma_tick_step,span=profile.max-profile.min;
  const values=!screen||!(step>0)||span/step>40?[0,1,2,3,4].map(i=>Math.round((profile.min+span*i/4)*10)/10):Array.from({length:Math.floor(span/step)+1},(_,i)=>profile.min+i*step);
@@ -135,7 +138,7 @@ function secondaryMeter(s,key='reflected'){
  const base=SECONDARY_PROFILES[key],v=s[key];
  const limit={reflected:s.model_profile?.reflected_max_w,input:s.model_profile?.input_max_w}[key];
  const p=Number.isFinite(limit)&&limit>0?{...base,max:limit}:base;
- const valid=s.connection==='Connected'&&!(s.age_seconds>3)&&typeof v==='number'&&Number.isFinite(v);
+ const valid=s.connection==='Connected'&&!(s.age_seconds>freshSeconds(s))&&typeof v==='number'&&Number.isFinite(v);
  const value=valid?v:null,position=value===null?0:100*Math.max(0,Math.min(p.max,value))/p.max;
  const list={reflected:s.model_profile?.reflected_ticks_w,input:s.model_profile?.input_ticks_w}[key],custom=Array.isArray(list)&&list.length>1;
  const ticks=custom?list:[0,p.max/2,p.max];
@@ -145,7 +148,7 @@ function secondaryMeter(s,key='reflected'){
 if(typeof module!=='undefined'){module.exports.secondaryMeter=secondaryMeter;module.exports.SECONDARY_PROFILES=SECONDARY_PROFILES;}
 
 function autotunePresentation(s,pending=false){
- const phase=s.autotune_phase||'idle',active=['entered','waiting','tuning','unknown','aborted'].includes(phase),link=s.connection==='Connected'&&!(s.age_seconds>3);
+ const phase=s.autotune_phase||'idle',active=['entered','waiting','tuning','unknown','aborted'].includes(phase),link=s.connection==='Connected'&&!(s.age_seconds>freshSeconds(s));
  let reason='';if(s.readiness_test)reason='No-RF readiness test: commands are managed by the test; do not transmit.';else if(s.power_test)reason='Restricted power-cycle test: tuning commands are blocked.';else if(s.mode_test)reason='Restricted Operate/Standby test: tuning commands are blocked.';else if(s.read_only)reason='Read-only telemetry: operating and tuning commands are blocked.';else if(!controlsVerified(s,false))reason='Auto-tune is verified only for OM-3501A.';else if(!link)reason='Fresh amplifier communication is required.';else if(pending||s.control?.pending)reason='Waiting for command confirmation.';else if(s.control?.uncertain)reason='Command result uncertain; check amplifier. No retry was sent.';else if(s.rf_state_unknown)reason='RF state is unconfirmed; keep RF off and check the amplifier.';else if(s.transmitting)reason='Stop RF before using tuning controls.';else if(s.control?.cooldown_remaining>0)reason='Please wait before another command.';
  let title={idle:'Automatic tuning',entered:'Preparing auto-tune',waiting:'WAITING FOR INPUT POWER',tuning:'AUTO-TUNE IN PROGRESS',succeeded:'SUCCESSFUL AUTOTUNE!',cancelled:'Auto-tune exited',aborted:'AUTO-TUNE ABORTED',defaults:'Auto-tune exited · defaults restored','stopped-exited':'Stopped tune exited · settings saved',unknown:'Unexpected auto-tune response'}[phase]||'Unexpected auto-tune response';
  let detail={idle:'Operator sets tuning power and supplies the steady carrier.',entered:'Waiting for amplifier readiness.',waiting:'Set the prescribed tuning drive level, then transmit a steady carrier from your radio.',tuning:'Operator controls RF. Stop RF manually if tuning is abnormal.',succeeded:s.autotune_saved?'Amplifier reported settings saved automatically. Stop tuning RF.':'Amplifier reported tuning complete. Stop tuning RF.',cancelled:'Returned from automatic tuning without applying RF.',aborted:s.autotune_abort_origin==='rf_lost'?'RF was released before completion. Exit auto-tune to restore default settings; this was not a successful tune.':s.autotune_abort_origin==='stop'?'Tuning was stopped. Release RF, then use Exit; the amplifier may save its current settings. This is not a successful tune.':'Stop RF manually and check the amplifier. The abort cause is unrecognized.',defaults:'Amplifier reported default settings saved. No successful tune was saved.','stopped-exited':'Amplifier reported user settings saved after Stop. Successful tuning was not confirmed.',unknown:(s.autotune_message||'Unrecognized response')+' · Stop RF and check the amplifier; no retry is sent.'}[phase];

@@ -131,7 +131,7 @@ function renderMeasurements(s){
  const finite=v=>typeof v==='number'&&Number.isFinite(v);const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value};
  renderTubeLabels(s);
  const meter=auxiliaryMeter(s);text('auxLabel',meter.label);renderAuxScale(meter);text('auxValue',(meter.value===null?'—':meter.value.toLocaleString(undefined,{maximumFractionDigits:0}))+' '+meter.unit);$('auxNeedle').hidden=meter.value===null;$('auxNeedle').style.left=meter.position+'%';$('auxTrack').setAttribute('aria-valuetext',meter.value===null?'Unavailable':meter.value+' '+meter.unit);if(meter.value===null)$('auxTrack').removeAttribute('aria-valuenow');else $('auxTrack').setAttribute('aria-valuenow',Math.max(meter.min,Math.min(meter.max,meter.value)));
- text('antennaName',s.connection==='Connected'&&s.age_seconds<=3&&s.antenna_name?s.antenna_name:'—');text('frequency',(finite(s.frequency_khz)?(s.frequency_khz/1000).toFixed(3):'—')+' MHz');text('temperature',(finite(s.temperature_c)?s.temperature_c.toFixed(0):'—')+' °C');
+ text('antennaName',s.connection==='Connected'&&s.age_seconds<=freshSeconds(s)&&s.antenna_name?s.antenna_name:'—');text('frequency',(finite(s.frequency_khz)?(s.frequency_khz/1000).toFixed(3):'—')+' MHz');text('temperature',(finite(s.temperature_c)?s.temperature_c.toFixed(0):'—')+' °C');
  for(const [key,unit,digits] of keyFields)text('key_'+key,(finite(s[key])?s[key].toLocaleString(undefined,{minimumFractionDigits:digits,maximumFractionDigits:digits}):'—')+' '+unit);
  for(const [key,unit,digits] of measurementFields)text("measurement_"+key,(finite(s[key])?s[key].toLocaleString(undefined,{minimumFractionDigits:digits,maximumFractionDigits:digits}):'—')+' '+unit);
 }
