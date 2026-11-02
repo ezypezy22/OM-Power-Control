@@ -47,4 +47,10 @@ class PositionTests(unittest.TestCase):
  def test_new_tune_clears_previous_positions(self):
   d=Decoder();d.feed(b'LO1890;TU2550;');d.feed(b'AUTO;');self.assertNotIn('load_pct',d.state);self.assertNotIn('tune_pct',d.state)
   d.feed(b'LO0;');self.assertEqual(d.state['load_pct'],0)
+class PlacementTests(unittest.TestCase):
+ def test_alert_banner_sits_directly_under_the_operating_state(self):
+  from pathlib import Path
+  html=Path(__file__).with_name('live.html').read_text(encoding='utf-8')
+  state=html.index('id="operatingState"');banner=html.index('id="alertBanner"');power=html.index('FORWARD POWER')
+  self.assertTrue(state<banner<power);self.assertEqual(html.count('id="alertBanner"'),1)
 if __name__=='__main__':unittest.main()

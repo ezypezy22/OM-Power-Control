@@ -75,10 +75,10 @@ class Simulated4001A(SimulatedAmplifier):
     FEATURES=('power','alert')
     ANTENNA=b'- NO ANTENNA SWITCH;'
     REPLY_GAP=3.2
-    ALERT=re.compile(r'(WG|FA)([1-9]|1[0-5])|HF|HVF|FERROR')
+    ALERT=re.compile(r'(WG|FA)([1-9]|1[0-5])|HF|HVF|FERROR|CLEAR')
     def __init__(self,warmup_seconds=180,cooldown_seconds=45,clock=time.monotonic,start='Off'):
         super().__init__();self.clock=clock;self.warmup=warmup_seconds;self.cooldown=cooldown_seconds
-        self.mode=start;self.mode_started=clock();self.countdown=None;self.last_batch=None;self.last_temp=None
+        self.mode=start;self.mode_started=clock();self.countdown=None;self.last_batch=None;self.last_temp=None;self.hard_fault=None
     def _begin(self,mode):self.mode=mode;self.mode_started=self.clock()
     def set_power(self,on):
         with self.lock:
@@ -87,14 +87,19 @@ class Simulated4001A(SimulatedAmplifier):
             elif not on and self.mode in ('Standby','Operate'):self._start_cooldown()
     def inject(self,token):
         if not isinstance(token,str) or not self.ALERT.fullmatch(token):raise ValueError('Unsupported simulated alert')
-        with self.lock:self.emit(token.encode('ascii')+b';')
+        with self.lock:
+            if token=='CLEAR':self.hard_fault=None;return     # what resetting the fault on the amplifier does
+            if token=='HF':self.hard_fault=self.clock()       # the amplifier repeats HF once per second until reset
+            self.emit(token.encode('ascii')+b';')
     def _start_warmup(self):
         self._begin('Warming up');self.countdown=self.warmup;self.emit(b'WA%d;'%self.warmup)
     def _start_cooldown(self):
         self._begin('Cooling down');self.last_temp=None;self.emit(b'COON;')
     def advance(self):
         super().advance()
-        elapsed=self.clock()-self.mode_started
+        now=self.clock()
+        if self.hard_fault is not None and now-self.hard_fault>=1.0:self.hard_fault=now;self.emit(b'HF;')
+        elapsed=now-self.mode_started
         if self.mode=='Warming up':
             # One WAx per second, as the amplifier sends them, then PAON and Standby.
             while self.countdown>max(1,self.warmup-int(elapsed)):self.countdown-=1;self.emit(b'WA%d;'%self.countdown)

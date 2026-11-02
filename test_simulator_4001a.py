@@ -56,8 +56,17 @@ class WireTests(unittest.TestCase):
   self.sim.set_power(True);self.sim.set_power(True);self.assertEqual(self.sim.mode,'Warming up')
  def test_injected_alerts(self):
   for token in ('WG11','FA4','HF','HVF','FERROR','WG15'):self.sim.inject(token);self.assertEqual(drain(self.sim),token.encode()+b';')
+  self.sim.inject('CLEAR');self.assertEqual(drain(self.sim),b'')
   for token in ('WG0','WG16','XX','HF;ST0000',None,11):
    with self.assertRaises(ValueError):self.sim.inject(token)
+ def test_hard_fault_repeats_every_second_until_cleared(self):
+  self.sim.inject('HF');self.assertEqual(drain(self.sim),b'HF;')
+  for _ in range(3):
+   self.clock.now+=1.0;self.sim.sendall(b'?');self.assertIn(b'HF;',drain(self.sim))
+  self.clock.now+=0.4;self.sim.sendall(b'?');self.assertNotIn(b'HF;',drain(self.sim))
+  self.sim.inject('CLEAR');self.assertEqual(drain(self.sim),b'')
+  self.clock.now+=5.0;self.sim.sendall(b'?');self.assertNotIn(b'HF;',drain(self.sim))
+  self.sim.inject('HVF');self.clock.now+=5.0;self.sim.sendall(b'?');self.assertEqual(drain(self.sim).count(b'HVF'),1)
  def test_decoder_follows_the_whole_session(self):
   d=Decoder();status=[]
   for command,advance in ((b'C',0),(b'?',0),(b'Y',0)):self.sim.sendall(command);d.feed(drain(self.sim));status.append(d.state.get('status'))

@@ -43,8 +43,8 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
  // Simulator extras appear only when the simulator supports them.
  const before=posts.length;
  state={...state,simulated:true,sim_features:['power','alert']};await vm.runInContext('refresh()',ctx);assert.equal(nodes.simExtras.hidden,false);
- node('simAlert').value='HF';await nodes.simAlertSend.onclick();assert.deepEqual(posts.at(-1).body,{alert:'HF'});assert.equal(posts.at(-1).path,'/simulation');
- await nodes.simPowerOn.onclick();assert.deepEqual(posts.at(-1).body,{power:true});await nodes.simPowerOff.onclick();assert.deepEqual(posts.at(-1).body,{power:false});assert.equal(posts.length,before+3);
+ node('simAlert').value='HF';await nodes.simAlertSend.onclick();assert.deepEqual(posts.at(-1).body,{alert:'HF'});assert.equal(nodes.simExtraState.textContent,'Sent: HF');assert.equal(posts.at(-1).path,'/simulation');
+ await nodes.simPowerOn.onclick();assert.deepEqual(posts.at(-1).body,{power:true});assert.equal(nodes.simExtraState.textContent,'Sent: PA on');await nodes.simPowerOff.onclick();assert.deepEqual(posts.at(-1).body,{power:false});assert.equal(posts.length,before+3);
  state={...state,sim_features:[]};await vm.runInContext('refresh()',ctx);assert.equal(nodes.simExtras.hidden,true);
  state={...state,simulated:false,sim_features:undefined};await vm.runInContext('refresh()',ctx);assert.equal(nodes.simExtras.hidden,true);
  console.log('Actual UI handlers: toggle skips prompt; power confirmations retained; RF guard and callsign badge pass');
