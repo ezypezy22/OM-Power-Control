@@ -77,6 +77,73 @@ class MonitorTests(unittest.TestCase):
     time.sleep(2.5);self.assertEqual(monitor.simulator.sent.count(b'1'),1)
    finally:monitor.disconnect();monitor.thread.join(4)
 
+class Amplifier:
+ """Fake amplifier socket for the real worker loop: replies[n] is returned on the nth read after CON,
+ and a callable in replies runs (e.g. queues a command) before its bytes are returned."""
+ def __init__(self,monitor,replies):self.monitor=monitor;self.replies=list(replies);self.sent=[];self.reads=0
+ def __enter__(self):return self
+ def __exit__(self,*args):pass
+ def settimeout(self,n):pass
+ def sendall(self,data):self.sent.append(data)
+ def recv(self,n):
+  if self.sent.count(b'C')>=2:return b'COFF;'
+  self.reads+=1
+  if self.reads==1:return b'CON;'
+  if not self.replies:self.monitor.stop.set();return b'TE63;'
+  reply=self.replies.pop(0)
+  return reply() if callable(reply) else reply
+
+class DelayedInfoTests(unittest.TestCase):
+ """Review point 2: a command queued under the label's profile must not reach a model the INFO reply rules out."""
+ def test_toggle_queued_before_a_late_4001a_info_is_cancelled_not_sent(self):
+  # Identification wait already over (INFO very late), so the label's OM-3501A profile accepts the toggle;
+  # the INFO reply arrives in the same read and the worker must recheck before sending.
+  def queue_then_info():
+   m.command('toggle','delayed-info-1',expected_mode='Standby');self.assertTrue(m.controls.pending)
+   return INFO_4001
+  m=Monitor(allow_hardware=True);m.settings.update(host='192.0.2.1',model='OM-3501A')
+  amp=Amplifier(m,[b'ST1100- HEXBEAM;PTTOFF;',queue_then_info,b'TE63;',b'TE63;'])
+  with patch('live.socket.create_connection',return_value=amp),patch('live.IDENTIFY_SECONDS',0):m.run()
+  self.assertNotIn(b'O',amp.sent);self.assertIsNone(m.controls.pending);self.assertFalse(m.controls.uncertain)
+  self.assertIn('monitoring only',m.controls.message)
+  self.assertEqual([h['phase'] for h in m.command_history],['queued','cancelled'])
+ def test_controls_take_rechecks_the_profile(self):
+  from controls import Controls
+  now=time.monotonic();s={'connection':'Connected','_received':now,'status':'Standby','transmitting':False,'controls_verified':True}
+  for action in ('toggle','on','off'):
+   c=Controls();c.request(action,'recheck-'+action,{**s,'status':'Off' if action=='on' else 'Standby'})
+   self.assertIsNone(c.take({**s,'status':'Off' if action=='on' else 'Standby','controls_verified':False}));self.assertIsNone(c.pending);self.assertFalse(c.uncertain)
+  t={**s,'status':'Operate','autotune_phase':'tuning','transmitting':True};c=Controls();c.request('autotune-stop','recheck-stop',t)
+  self.assertIsNone(c.take({**t,'controls_verified':False}))
+  with self.assertRaisesRegex(ValueError,'Monitoring only'):Controls().request('toggle','recheck-req',{**s,'controls_verified':False})
+ def test_commands_wait_for_identification_then_follow_the_reported_model(self):
+  result={}
+  def too_early():
+   with self.assertRaisesRegex(ValueError,'report its model'):m.command('toggle','too-early-1',expected_mode='Standby')
+   result['early']=m.snapshot()['model_pending'];return b'TE63;'
+  def after_info():
+   m.command('toggle','after-info-1',expected_mode='Standby');return b'TE63;'
+  m=Monitor(allow_hardware=True);m.settings.update(host='192.0.2.1',model='OM-3501A')
+  amp=Amplifier(m,[b'ST1100- HEXBEAM;PTTOFF;',too_early,INFO_3501,after_info,b'OPERATE;'])
+  with patch('live.socket.create_connection',return_value=amp):m.run()
+  self.assertTrue(result['early']);self.assertEqual(amp.sent.count(b'O'),1);self.assertEqual(m.controls.message,'Operating mode confirmed by amplifier')
+ def test_a_4001a_reply_inside_the_wait_never_unlocks_controls(self):
+  def try_toggle():
+   with self.assertRaisesRegex(ValueError,'Monitoring only'):m.command('toggle','after-4001-1',expected_mode='Standby')
+   return b'TE63;'
+  m=Monitor(allow_hardware=True);m.settings.update(host='192.0.2.1',model='OM-3501A')
+  amp=Amplifier(m,[b'ST0100- NO ANTENNA SWITCH;PTTOFF;',INFO_4001,try_toggle])
+  with patch('live.socket.create_connection',return_value=amp):m.run()
+  self.assertNotIn(b'O',amp.sent)
+ def test_no_info_reply_falls_back_to_the_label_after_the_wait(self):
+  # Firmware that does not answer INFO keeps working once the identification wait has passed.
+  def queue():
+   m.command('toggle','no-info-1',expected_mode='Standby');return b'TE63;'
+  m=Monitor(allow_hardware=True);m.settings.update(host='192.0.2.1',model='OM-3501A')
+  amp=Amplifier(m,[b'ST1100- HEXBEAM;PTTOFF;',queue,b'OPERATE;'])
+  with patch('live.socket.create_connection',return_value=amp),patch('live.IDENTIFY_SECONDS',0):m.run()
+  self.assertEqual(amp.sent.count(b'O'),1);self.assertFalse(m.snapshot()['model_pending'])
+
 class SafetyTests(unittest.TestCase):
  def test_read_only_allows_info_but_no_other_query_or_control(self):
   class Wire:

@@ -9,7 +9,7 @@ function amplifierPresentation(s) {
  if(connection==='Stale')return {kind:'stale',title:'Readings delayed',detail:'Waiting for fresh amplifier data · controls paused'};
  if(connection!=='Connected')return {kind:'offline',title:'Disconnected',detail:'Amplifier state unavailable'};
  const mode=s.status||'Unknown';
- if(s.alert&&(s.alert.kind==='hard_fault'||s.alert.kind==='hv_fault'))return {kind:'fault',title:s.alert.kind==='hv_fault'?'High-voltage fault':'Hard fault',detail:s.alert.text};
+ if(s.fault)return {kind:'fault',title:s.fault.kind==='hv_fault'?'High-voltage fault':'Hard fault',detail:s.fault.text};
  if(mode==='Cooling down'&&Number.isFinite(s.cooling_temp_c)&&!Number.isInteger(s.countdown))return {kind:'cooling',title:'Cooling down',detail:'Waiting to cool below 40 °C · now '+s.cooling_temp_c+' °C · reported by amplifier'};
  if(mode==='Warming up'||mode==='Cooling down') {
   const n=Number.isInteger(s.countdown)&&s.countdown>=0?s.countdown:null;
@@ -32,7 +32,8 @@ function aboutAmplifier(info){
 }
 if(typeof module!=='undefined')Object.assign(module.exports,{formatOperatingTime,formatFirmware,aboutAmplifier});
 
-/* Non-fault amplifier alerts (WGx/FAx warnings, soft-start error) shown beside, not instead of, the operating state. */
+/* Non-fault amplifier alerts (WGx/FAx warnings, soft-start error) shown beside, not instead of, the operating state.
+   Serious faults arrive separately as s.fault, so a warning shows here even while a fault holds the state line. */
 function alertPresentation(s){
  const a=s.alert;
  if(!a||a.kind==='hard_fault'||a.kind==='hv_fault')return {visible:false,kind:'',text:''};
@@ -56,7 +57,8 @@ function amplifierControls(s,localPending=false){
  else if(s.mode_test)reason='Restricted Operate/Standby test: commands are managed by the test; power and tuning are blocked.';
  else if(s.read_only)reason='Read-only telemetry: operating and tuning commands are blocked.';
  else if(!controlsVerified(s,true))reason='Monitoring only: controls are unverified for this model.';
- else if(s.alert&&(s.alert.kind==='hard_fault'||s.alert.kind==='hv_fault'))reason='Amplifier fault active: commands are blocked. '+s.alert.text;
+ else if(s.fault)reason='Amplifier fault active: commands are blocked. '+s.fault.text;
+ else if(s.model_pending)reason='Waiting for the amplifier to report its model before enabling controls.';
  else if(s.connection!=='Connected'||s.age_seconds>freshSeconds(s))reason='Connect and wait for fresh amplifier data to use controls.';
  else if(c.uncertain)reason='Command result is uncertain. Reconnect to reassess; no retry was sent.';
  else if(localPending||c.pending)reason='Waiting for amplifier confirmation…';

@@ -25,7 +25,7 @@ class Tests(unittest.TestCase):
     if self.sent.count(b'C')>=2:return b'COFF;'
     self.reads+=1
     if self.reads==1:return b'CON;'
-    if self.reads==2:return b'STBY;PTTOFF;'
+    if self.reads==2:return b'STBY;PTTOFF;INFO:2401,224 66,0,03.25,355,OM3501A;'
     if self.reads==3:
      m.command('toggle','test-command-1')
      return b'TE63;'

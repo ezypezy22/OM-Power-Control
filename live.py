@@ -7,7 +7,11 @@ SLOW_FIELDS=('plate_a','plate_v','screen_v','heater_a_v','heater_b_v','mains_v',
 # Seconds an amplifier alert stays visible after it was last received (None: until reconnect).
 # The amplifier sends no all-clear: HF repeats every second while the fault persists.
 ALERT_TTL={'warning':30,'limit':30,'hard_fault':5,'hv_fault':None,'soft_start':60}
-FAULT_KINDS=('hard_fault','hv_fault')
+from decoder import SERIOUS_FAULTS as FAULT_KINDS
+FAULT_TITLES={'hv_fault':'High-voltage fault','hard_fault':'Hard fault'}
+# Seconds after session setup that operating commands wait for the INFO reply to identify the model,
+# so a command cannot reach an amplifier whose reported model turns out to be monitoring only.
+IDENTIFY_SECONDS=5
 EXTRA_FIELDS=(*SLOW_FIELDS,'screen_ma','frequency_khz')
 HELD_FIELDS=(*SLOW_FIELDS,'frequency_khz')
 from controls import Controls
@@ -38,6 +42,18 @@ def alert_age(state,now):
  ttl=ALERT_TTL.get(alert.get('kind'),30)
  return (None,None) if ttl is not None and age>ttl else (alert,round(age,1))
 
+def active_fault(state,now):
+ """Most serious fault still in force and seconds since it was last received, or (None, None).
+
+ Faults are tracked apart from warnings: a later WGx/FAx never clears one."""
+ faults=state.get('faults') or {};times=state.get('_field_times',{})
+ for kind in FAULT_KINDS:
+  fault=faults.get(kind)
+  if not fault:continue
+  age=now-times.get('fault:'+kind,now);ttl=ALERT_TTL.get(kind)
+  if ttl is None or age<=ttl:return {**fault,'title':FAULT_TITLES[kind]},round(age,1)
+ return None,None
+
 def readiness_requirement(step,state):
  """Require the exact acknowledged state at each authorized no-RF step."""
  sequence=(('toggle',b'O','Standby',None),('autotune',b'L','Operate',None),('autotune',b'&','Operate',('entered','waiting')),('autotune-exit',b'*','Operate',('waiting',)),('toggle',b'O','Operate',('cancelled',)))
@@ -56,7 +72,7 @@ class Monitor:
   self.power_test=power_test;self.power_test_sent=0
   self.readiness_test=readiness_test;self.readiness_test_sent=0
   self.tune_test=tune_test;self.tune_test_counts={}
-  self.trace=trace
+  self.trace=trace;self.identify_until=None
   if tune_test:self.settings['share_dxc']=False
   if simulate:
    from simulator import simulator_for
@@ -100,6 +116,8 @@ class Monitor:
    for key in ('grid_a_v','grid_b_v'):
     if s.get(key) is not None:s[key]=0.0
   s['alert'],s['alert_age_seconds']=alert_age({**s,'_field_times':field_times},now)
+  s['fault'],s['fault_age_seconds']=active_fault({**s,'_field_times':field_times},now);s.pop('faults',None)
+  s['model_pending']=self.identify_until is not None and not s.get('info') and now<self.identify_until and s['connection'] in ('Connected','Waiting for amplifier data')
   s['grid_v']=s['grid_a_v']-s['grid_b_v'] if s.get('grid_a_v') is not None and s.get('grid_b_v') is not None else None
   if s.get('forward') is None or s.get('input') is None:s['gain_db']=None
   return s
@@ -180,9 +198,15 @@ class Monitor:
    if self.controls.pending and not duplicate:self.controls.pending['source']=pending['source']
    self.trace_command('duplicate ignored' if duplicate else 'queued',pending,self.controls.message)
  def control_state(self):
-  """State handed to Controls: adds fault_active so queued commands are refused during a hard fault."""
-  alert,_=alert_age(self.state,time.monotonic())
-  return {**self.state,'fault_active':bool(alert and alert['kind'] in FAULT_KINDS)}
+  """State handed to Controls, rechecked on every request and again immediately before a queued command is sent.
+
+  fault_active: a serious fault (HF/HVF) is in force, whatever warnings arrived after it.
+  controls_verified: the profile in force now, so an INFO reply that identifies a monitoring-only
+  model cancels a command queued under the label's profile.
+  model_pending: the INFO reply has not arrived yet and the identification wait has not passed."""
+  now=time.monotonic();fault,_=active_fault(self.state,now)
+  pending=self.identify_until is not None and not self.state.get('info') and now<self.identify_until
+  return {**self.state,'fault_active':fault is not None,'controls_verified':self.profile_now()['controls_verified'] is True,'model_pending':pending}
  def disconnect(self):
   with self.lock:
    self.stop.set()
@@ -228,7 +252,7 @@ class Monitor:
     received=time.monotonic()
     sock.sendall(b'?');sock.sendall(b'1')   # 1: one INFO request (model, firmware, hours) per connection
     next_poll=0;next_frequency=0;next_status=time.monotonic()+2
-    with self.lock:self.state={'connection':'Waiting for amplifier data','_received':received}
+    with self.lock:self.state={'connection':'Waiting for amplifier data','_received':received};self.identify_until=received+IDENTIFY_SECONDS
     while not self.stop.is_set():
      now=time.monotonic()
      if now-received>10:raise TimeoutError('No amplifier data for 10 seconds')

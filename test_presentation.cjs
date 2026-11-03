@@ -79,16 +79,24 @@ for(const [key,value,max] of [['reflected',250,500],['input',50,100],['plate_a',
 console.log('Selectable secondary-meter ranges and unavailable states pass');
 {
  const {alertPresentation:a}=require('./presentation.js');
- const hard={kind:'hard_fault',code:null,text:'Hard fault: plate-current limit exceeded.'};
- assert.equal(p({...live,status:'Operate',alert:hard}).kind,'fault');
- assert.equal(p({...live,status:'Operate',alert:{kind:'hv_fault',text:'HV'}}).title,'High-voltage fault');
- assert.equal(p({connection:'Disconnected',alert:hard}).title,'Disconnected');
+ const hard={kind:'hard_fault',code:null,title:'Hard fault',text:'Hard fault: plate-current limit exceeded.'};
+ const warning={kind:'warning',code:11,text:'Warning: SWR is too high'};
+ assert.equal(p({...live,status:'Operate',fault:hard}).kind,'fault');
+ assert.equal(p({...live,status:'Operate',fault:{kind:'hv_fault',text:'HV'}}).title,'High-voltage fault');
+ assert.equal(p({connection:'Disconnected',fault:hard}).title,'Disconnected');
  assert.equal(p({...live,status:'Operate',alert:{kind:'warning',code:1,text:'w'}}).kind,'operate');
+ // A warning received after a fault (HF;WG11;) keeps the fault state and the command block, and shows the warning too.
+ assert.equal(p({...live,status:'Operate',fault:hard,alert:warning}).kind,'fault');
+ assert.equal(c({...live,status:'Operate',age_seconds:0,fault:hard,alert:warning}).toggle.disabled,true);
+ assert.deepEqual(a({fault:hard,alert:warning}),{visible:true,kind:'warning',text:warning.text});
  assert.match(p({...live,status:'Cooling down',cooling_temp_c:52}).detail,/52 °C/);
  assert.match(p({...live,status:'Cooling down',cooling_temp_c:52,countdown:30}).detail,/0:30 remaining/);
- assert.equal(c({...live,status:'Operate',alert:hard}).toggle.disabled,true);
- assert.match(c({...live,status:'Operate',alert:hard}).reason,/fault active/i);
+ assert.equal(c({...live,status:'Operate',fault:hard}).toggle.disabled,true);
+ assert.match(c({...live,status:'Operate',fault:hard}).reason,/fault active/i);
  assert.equal(c({...live,status:'Operate',age_seconds:0,alert:{kind:'warning',code:1,text:'w'}}).toggle.disabled,false);
+ // Controls stay paused until the amplifier reports its model (delayed INFO).
+ assert.equal(c({...live,status:'Standby',age_seconds:0,model_pending:true}).toggle.disabled,true);
+ assert.match(c({...live,status:'Standby',age_seconds:0,model_pending:true}).reason,/report its model/);
  assert.equal(a({alert:hard}).visible,false);
  assert.deepEqual(a({alert:{kind:'limit',text:'Second limit exceeded: SWR is too high'}}),{visible:true,kind:'limit',text:'Second limit exceeded: SWR is too high'});
  assert.equal(a({}).visible,false);

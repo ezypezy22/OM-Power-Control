@@ -11,9 +11,10 @@ class Tests(unittest.TestCase):
  def test_unknown_alert_number_is_still_reported(self):
   d=Decoder();d.feed(b'WG99;');self.assertEqual(d.state['alert']['code'],99);self.assertIn('99',d.state['alert']['text'])
  def test_fault_tokens(self):
-  for token,kind in [(b'HF;','hard_fault'),(b'HVF;','hv_fault'),(b'FERROR;','soft_start')]:
-   d=Decoder();d.feed(token);self.assertEqual(d.state['alert']['kind'],kind)
-  d=Decoder();d.feed(b'HF;HF;');self.assertEqual(d.field_revisions['alert'],2)
+  for token,kind in [(b'HF;','hard_fault'),(b'HVF;','hv_fault')]:
+   d=Decoder();d.feed(token);self.assertEqual(d.state['faults'][kind]['kind'],kind);self.assertNotIn('alert',d.state)
+  d=Decoder();d.feed(b'FERROR;');self.assertEqual(d.state['alert']['kind'],'soft_start');self.assertNotIn('faults',d.state)
+  d=Decoder();d.feed(b'HF;HF;');self.assertEqual(d.field_revisions['fault:hard_fault'],2)
  def test_alert_does_not_change_operating_state_or_rf(self):
   d=Decoder();d.feed(b'ST1110- HEXBEAM;WG2;');self.assertEqual(d.state['status'],'Operate');self.assertFalse(d.state['transmitting'])
  def test_cooling_temperature_and_countdown(self):
@@ -36,9 +37,46 @@ class Tests(unittest.TestCase):
   t={**s,'transmitting':True,'autotune_phase':'tuning'};c=Controls();c.request('autotune-stop','request-125',t);self.assertEqual(c.take(t),b'8')
  def test_monitor_snapshot_and_control_state(self):
   m=Monitor(simulate=True);now=time.monotonic()
-  m.state={'connection':'Connected','_received':now,'alert':{'kind':'hard_fault','code':None,'text':'t'},'_field_times':{'alert':now}}
-  self.assertTrue(m.control_state()['fault_active']);self.assertEqual(m.snapshot()['alert']['kind'],'hard_fault')
-  m.state['_field_times']['alert']=now-10;self.assertFalse(m.control_state()['fault_active']);self.assertIsNone(m.snapshot()['alert'])
+  m.state={'connection':'Connected','_received':now,'faults':{'hard_fault':{'kind':'hard_fault','code':None,'text':'t'}},'_field_times':{'fault:hard_fault':now}}
+  self.assertTrue(m.control_state()['fault_active']);s=m.snapshot();self.assertEqual((s['fault']['kind'],s['fault']['title']),('hard_fault','Hard fault'));self.assertIsNone(s['alert']);self.assertNotIn('faults',s)
+  m.state['_field_times']['fault:hard_fault']=now-10;self.assertFalse(m.control_state()['fault_active']);self.assertIsNone(m.snapshot()['fault'])
+
+class MixedFaultTests(unittest.TestCase):
+ """Review point 1: a warning arriving after a serious fault must not replace it or lift the command block."""
+ def monitor(self,data,ages=None):
+  """Monitor whose state is the decoder's after data, every field received now (or ages[key] seconds ago)."""
+  d=Decoder();d.feed(b'ST1110- HEXBEAM;'+data);now=time.monotonic();ages=ages or {}
+  m=Monitor(simulate=True)
+  m.state={**d.state,'connection':'Connected','_received':now,'_field_times':{k:now-ages.get(k,0) for k in d.field_revisions}}
+  return m
+ def assert_blocked(self,m):
+  now=time.monotonic();state=m.control_state();self.assertTrue(state['fault_active'])
+  for action in ('toggle','off','autotune'):
+   with self.assertRaises(ValueError,msg=action):Controls().request(action,'request-'+action+'-1',state)
+  c=Controls();c.request('toggle','request-queued-1',{**state,'fault_active':False});self.assertIsNone(c.take(state));self.assertIn('fault',c.message)
+ def test_warning_after_fault_keeps_the_fault(self):
+  for data,kind in ((b'HVF;WG11;','hv_fault'),(b'HF;WG11;','hard_fault'),(b'HF;FA4;','hard_fault'),(b'HVF;FERROR;','hv_fault')):
+   for cut in range(len(data)+1):
+    d=Decoder();d.feed(data[:cut]);d.feed(data[cut:])
+    self.assertEqual(d.state['faults'][kind]['kind'],kind,data);self.assertNotEqual(d.state['alert']['kind'],kind)
+   m=self.monitor(data);s=m.snapshot()
+   self.assertEqual(s['fault']['kind'],kind,data);self.assertIsNotNone(s['alert'],data);self.assertNotIn(s['alert']['kind'],('hard_fault','hv_fault'))
+   self.assert_blocked(m)
+ def test_warning_before_fault_and_warning_expiry(self):
+  m=self.monitor(b'WG11;HVF;WG2;',ages={'alert':31})
+  s=m.snapshot();self.assertEqual(s['fault']['kind'],'hv_fault');self.assertIsNone(s['alert'],'expired warning stays expired');self.assert_blocked(m)
+ def test_hv_fault_outranks_and_outlasts_a_hard_fault(self):
+  m=self.monitor(b'HVF;HF;WG11;');self.assertEqual(m.snapshot()['fault']['kind'],'hv_fault')
+  m=self.monitor(b'HF;HVF;WG11;',ages={'fault:hard_fault':60});self.assertEqual(m.snapshot()['fault']['kind'],'hv_fault');self.assert_blocked(m)
+ def test_hard_fault_expires_on_its_own_timer_not_the_warnings(self):
+  # HF stopped repeating 6 s ago while a warning keeps arriving: the fault clears, the warning stays.
+  m=self.monitor(b'HF;WG11;',ages={'fault:hard_fault':6});s=m.snapshot()
+  self.assertIsNone(s['fault']);self.assertEqual(s['alert']['kind'],'warning');self.assertFalse(m.control_state()['fault_active'])
+  # A warning arriving 6 s after the last HF does not stretch the fault, and a repeating HF keeps it.
+  m=self.monitor(b'HF;WG11;HF;',ages={'alert':0});self.assertEqual(m.snapshot()['fault']['kind'],'hard_fault')
+ def test_tune_stop_still_allowed_during_a_mixed_fault(self):
+  m=self.monitor(b'AUTO;AUTO:AUTOTUNE IN PROGRESS;HF;WG11;');state={**m.control_state(),'transmitting':True}
+  c=Controls();c.request('autotune-stop','request-stop-1',state);self.assertEqual(c.take(state),b'8')
 class PositionTests(unittest.TestCase):
  def test_load_and_tune_percent(self):
   msg=b'LO1890;TU2550;'

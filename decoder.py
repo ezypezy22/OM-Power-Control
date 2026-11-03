@@ -29,6 +29,8 @@ def packets(path,host=None,port=10001):
 ALERT_NAMES={1:'Output power is too high',2:'Reflected power is too high',3:'Input power is too high',4:'Plate current is too high',5:'Plate voltage is low',6:'Screen current is too high',7:'Screen voltage is low',8:'Grid current is too high',9:'Grid voltage is low',10:'Heating voltage is not in limit',11:'SWR is too high',12:'Gain is low',13:'PA temperature is high',14:'Network voltage is low',15:'Blower is not rotating'}
 # Fixed-text amplifier fault messages: token -> (kind, text).
 FAULT_TOKENS={'HF':('hard_fault','Hard fault: plate-current limit exceeded. Reset it on the amplifier; this app does not send a reset.'),'HVF':('hv_fault','High-voltage fault: residual high voltage on the plate. It cannot be reset remotely; switch the amplifier off and on manually.'),'FERROR':('soft_start','Soft-start error: the amplifier could not be turned on.')}
+# Fault kinds that block operating commands, most serious first.
+SERIOUS_FAULTS=('hv_fault','hard_fault')
 
 class Decoder:
     def __init__(self):
@@ -157,7 +159,12 @@ class Decoder:
         else:
             kind='warning' if token[:2]=='WG' else 'limit';code=int(token[2:])
             text=('Warning' if kind=='warning' else 'Second limit exceeded')+': '+ALERT_NAMES.get(code,'alert '+str(code))
-        self.state['alert']={'kind':kind,'code':code,'text':text};self.mark('alert')
+        value={'kind':kind,'code':code,'text':text}
+        if kind in SERIOUS_FAULTS:
+            # Serious faults are kept per kind, apart from transient alerts, so a later warning
+            # (HVF;WG11;) never replaces the fault or lifts the command block.
+            self.state['faults']={**self.state.get('faults',{}),kind:value};self.mark('fault:'+kind)
+        else:self.state['alert']=value;self.mark('alert')
 
     def mark(self,key):self.field_revisions[key]=self.field_revisions.get(key,0)+1
 
