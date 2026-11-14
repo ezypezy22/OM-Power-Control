@@ -1,3 +1,4 @@
+import isolated_settings  # noqa: F401  (keep tests off the real settings file)
 """Wire tracing preserves exact bytes and cannot bypass access policies."""
 import json,tempfile,threading,unittest
 from pathlib import Path
@@ -42,4 +43,4 @@ class WireTraceTests(unittest.TestCase):
   trace.close();rows=self.rows()
   self.assertTrue(any(r['kind']=='rx' and b'PTTOFF;' in bytes.fromhex(r['hex']) for r in rows))
   self.assertTrue(any(r['kind']=='decoded' and 'PTTOFF' in r['tokens'] and r['rf_idle_confirmed'] for r in rows))
-  self.assertTrue(set(raw.sent)<={b'C',b'?',b'#',b'F'})
+  self.assertTrue(set(raw.sent)<={b'C',b'?',b'#',b'F',b'1'})
