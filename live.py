@@ -5,8 +5,9 @@ from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 from decoder import Decoder
 SLOW_FIELDS=('plate_a','plate_v','screen_v','heater_a_v','heater_b_v','mains_v','temperature_c','grid_a_v','grid_b_v')
 # Seconds an amplifier alert stays visible after it was last received (None: until reconnect).
-# The amplifier sends no all-clear: HF repeats every second while the fault persists.
-ALERT_TTL={'warning':30,'limit':30,'hard_fault':5,'hv_fault':None,'soft_start':60}
+# HF/HVF stay latched for this session: silence is not confirmed recovery.
+# Recover on the amplifier, then reconnect to establish a new session; never auto-reset.
+ALERT_TTL={'warning':30,'limit':30,'hard_fault':None,'hv_fault':None,'soft_start':60}
 from decoder import SERIOUS_FAULTS as FAULT_KINDS
 FAULT_TITLES={'hv_fault':'High-voltage fault','hard_fault':'Hard fault'}
 # Seconds after session setup that operating commands wait for the INFO reply to identify the model,

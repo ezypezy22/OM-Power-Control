@@ -27,7 +27,7 @@ class Tests(unittest.TestCase):
  def test_alert_expiry(self):
   base={'alert':{'kind':'warning','code':1,'text':'x'},'_field_times':{'alert':100.0}}
   self.assertIsNotNone(alert_age(base,110)[0]);self.assertIsNone(alert_age(base,131)[0])
-  hf={'alert':{'kind':'hard_fault'},'_field_times':{'alert':100.0}};self.assertIsNotNone(alert_age(hf,104)[0]);self.assertIsNone(alert_age(hf,106)[0])
+  hf={'alert':{'kind':'hard_fault'},'_field_times':{'alert':100.0}};self.assertIsNotNone(alert_age(hf,104)[0]);self.assertIsNotNone(alert_age(hf,106)[0])
   hv={'alert':{'kind':'hv_fault'},'_field_times':{'alert':100.0}};self.assertIsNotNone(alert_age(hv,100000)[0])
   self.assertEqual(alert_age({},5),(None,None))
  def test_hard_fault_blocks_commands_but_not_tune_stop(self):
@@ -40,7 +40,7 @@ class Tests(unittest.TestCase):
   m=Monitor(simulate=True);now=time.monotonic()
   m.state={'connection':'Connected','_received':now,'faults':{'hard_fault':{'kind':'hard_fault','code':None,'text':'t'}},'_field_times':{'fault:hard_fault':now}}
   self.assertTrue(m.control_state()['fault_active']);s=m.snapshot();self.assertEqual((s['fault']['kind'],s['fault']['title']),('hard_fault','Hard fault'));self.assertIsNone(s['alert']);self.assertNotIn('faults',s)
-  m.state['_field_times']['fault:hard_fault']=now-10;self.assertFalse(m.control_state()['fault_active']);self.assertIsNone(m.snapshot()['fault'])
+  m.state['_field_times']['fault:hard_fault']=now-10;self.assertTrue(m.control_state()['fault_active']);self.assertIsNotNone(m.snapshot()['fault'])
 
 class MixedFaultTests(unittest.TestCase):
  """Review point 1: a warning arriving after a serious fault must not replace it or lift the command block."""
@@ -69,11 +69,11 @@ class MixedFaultTests(unittest.TestCase):
  def test_hv_fault_outranks_and_outlasts_a_hard_fault(self):
   m=self.monitor(b'HVF;HF;WG11;');self.assertEqual(m.snapshot()['fault']['kind'],'hv_fault')
   m=self.monitor(b'HF;HVF;WG11;',ages={'fault:hard_fault':60});self.assertEqual(m.snapshot()['fault']['kind'],'hv_fault');self.assert_blocked(m)
- def test_hard_fault_expires_on_its_own_timer_not_the_warnings(self):
-  # HF stopped repeating 6 s ago while a warning keeps arriving: the fault clears, the warning stays.
+ def test_hard_fault_remains_latched_when_only_warnings_arrive(self):
+  # Missing HF repetitions are not proof of recovery, even with fresh warning traffic.
   m=self.monitor(b'HF;WG11;',ages={'fault:hard_fault':6});s=m.snapshot()
-  self.assertIsNone(s['fault']);self.assertEqual(s['alert']['kind'],'warning');self.assertFalse(m.control_state()['fault_active'])
-  # A warning arriving 6 s after the last HF does not stretch the fault, and a repeating HF keeps it.
+  self.assertEqual(s['fault']['kind'],'hard_fault');self.assertEqual(s['alert']['kind'],'warning');self.assertTrue(m.control_state()['fault_active'])
+  # Subsequent warnings and repeated HF both preserve the original fault inhibition.
   m=self.monitor(b'HF;WG11;HF;',ages={'alert':0});self.assertEqual(m.snapshot()['fault']['kind'],'hard_fault')
  def test_tune_stop_still_allowed_during_a_mixed_fault(self):
   m=self.monitor(b'AUTO;AUTO:AUTOTUNE IN PROGRESS;HF;WG11;');state={**m.control_state(),'transmitting':True}

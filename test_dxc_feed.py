@@ -40,8 +40,11 @@ class FeedTests(unittest.TestCase):
    token=data['control_token']
    with self.assertRaises(urllib.error.HTTPError) as err:self.post(token,{'action':'toggle','id':'fault-request-'+kind,'expected_mode':'Operate'})
    self.assertEqual(err.exception.code,409);self.assertIn('fault',json.load(err.exception)['error'].lower());self.assertIsNone(self.m.controls.pending)
-  # A hard fault that has stopped repeating clears from the feed.
-  self.m.state['_field_times']['fault:hard_fault']=now-10;self.assertIsNone(json.load(self.get())['om']['fault'])
+  # Missing repetitions never clear the shared fault or reauthorize controls.
+  self.m.state['_field_times']['fault:hard_fault']=now-3600
+  self.assertEqual(json.load(self.get())['om']['fault']['kind'],'hard_fault')
+  with self.assertRaises(urllib.error.HTTPError) as err:self.post(token,{'action':'toggle','id':'aged-shared-fault','expected_mode':'Operate'})
+  self.assertEqual(err.exception.code,409);self.assertIsNone(self.m.controls.pending)
  def post(self,token,value):return urllib.request.urlopen(urllib.request.Request(self.base+'/api/v1/control',json.dumps(value).encode(),headers={'X-OM-Feed-Token':token,'Content-Type':'application/json'}))
  def test_existing_controls_guard_and_single_request(self):
   self.enable();token=json.load(self.get())['control_token'];value={'action':'toggle','id':'request-test-123','expected_mode':'Standby'}

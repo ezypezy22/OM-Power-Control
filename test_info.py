@@ -40,8 +40,8 @@ class ResolveTests(unittest.TestCase):
   self.assertEqual((p['name'],p['controls_verified'],p['full_scale_w']),('OM-4001A',False,5000));self.assertIn('OM4001A',note);self.assertIn('OM-3501A',note)
  def test_a_4001a_label_on_a_3501a_takes_the_3501a_profile(self):
   p,note=resolve('OM-4001A',self.info('OM3501A'));self.assertEqual((p['name'],p['controls_verified']),('OM-3501A',True));self.assertTrue(note)
- def test_unrecognised_reply_keeps_the_label_and_says_so(self):
-  p,note=resolve('OM-3501A',self.info('OM4001C'));self.assertEqual(p['name'],'OM-3501A');self.assertIn('does not recognise',note)
+ def test_unrecognised_reply_keeps_only_display_profile_and_says_so(self):
+  p,note=resolve('OM-3501A',self.info('OM4001C'));self.assertEqual(p['name'],'OM-3501A');self.assertFalse(p['controls_verified']);self.assertIn('does not recognise',note)
   self.assertEqual(resolve('HEXBEAM',self.info('OM4001A'))[0]['name'],'OM-4001A')
  def test_old_firmware_is_flagged(self):
   self.assertIn('older than 3.16',resolve('OM-4001A',self.info('OM4001A','03.10'))[1]);self.assertIn('older than 3.16',resolve('OM-3501A',self.info('OM3501A','02.99'))[1])

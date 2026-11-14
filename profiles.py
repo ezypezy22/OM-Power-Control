@@ -41,7 +41,7 @@ def resolve(label,info):
  """Profile and notice once the amplifier has identified itself (INFO reply).
 
  A known model reported by the amplifier overrides the label, so a wrong label cannot unlock controls
- that were validated for a different model. An unrecognised reply keeps the label's profile."""
+ that were validated for a different model. An unrecognised reply may keep the display profile, but never operating permission."""
  chosen=profile(label);notes=[]
  if not info:return chosen,''
  reported=info.get('model');detected=_lookup(reported)
@@ -49,7 +49,9 @@ def resolve(label,info):
   if detected['name']!=chosen.get('name'):
    notes.append('Amplifier reports %s but the model label is %s; using the amplifier\'s profile.'%(reported,label or 'empty'))
    chosen={**copy.deepcopy(detected),'known':True}
- else:notes.append('Amplifier reports %s, which this app does not recognise; using the profile for %s.'%(reported,label or 'an unlabelled model'))
+ else:
+  chosen['controls_verified']=False
+  notes.append('Amplifier reports %s, which this app does not recognise; monitoring only, using the display profile for %s.'%(reported,label or 'an unlabelled model'))
  floor=chosen.get('min_firmware')
  if floor and _older(info.get('firmware'),floor):notes.append('Firmware %s is older than %s, the minimum in the protocol document; readings may differ.'%(info.get('firmware'),'.'.join(str(x) for x in floor)))
  return chosen,' '.join(notes)

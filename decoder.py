@@ -70,6 +70,11 @@ class Decoder:
                 if token.startswith('ST') and token!='STBY':self.state['startup_status_reply']=token
                 # ST0111 (PTT keyed) was seen on a real OM-4001A during transmit; it is still Operate.
                 # STxabcd: x is the antenna [0-9, A, F] (0: no antenna switch), a/b/c are PA on, operate and PTT.
+                # PTT-on status revokes earlier idle evidence, including tune-mode
+                # status and a missed standalone PTTON. Idle ST never releases RF.
+                if re.fullmatch(r'ST[0-9AF][01][01]1[01-]\s*.*',token):
+                    self.mark('rf');self._saved_tune_release=False;self._last_plate_current=None
+                    self.state.update(transmitting=True,rf_idle_confirmed=False,rf_idle_source=None)
                 status_match=re.fullmatch(r'ST([0-9AF]\d{3})-\s*(.*)',token)
                 if status_match:
                     code,name=status_match.groups()
