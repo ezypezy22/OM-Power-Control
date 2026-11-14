@@ -20,12 +20,11 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
  state={...state,status:'Off'};await vm.runInContext('refresh()',ctx);await nodes.on.onclick();assert.equal(confirmations.length,2);assert.equal(posts.length,1);
  state={...state,transmitting:true,status:'Operate'};await vm.runInContext('refresh()',ctx);await nodes.toggle.onclick();assert.equal(posts.length,1);
  state={...state,settings:{...state.settings,callsign:''}};await vm.runInContext('loadedSettings=false;refresh()',ctx);assert.equal(nodes.stationCall.hidden,true);
- state={...state,connection:'Connected',age_seconds:0,input:21,plate_a:.86,gain_db:18.3};
- for(const [key,label,value,max] of [['input','INPUT POWER · W','21',100],['plate_a','PLATE CURRENT · A','0.86',3],['gain_db','CALC GAIN · dB','18.3',30],['reflected','REFLECTED · W','0',500]]){
-  nodes.secondaryChoice.value=key;await nodes.secondaryChoice.onchange();await vm.runInContext('refresh()',ctx);
-  assert.equal(nodes.secondaryLabel.textContent,label);assert.equal(nodes.reflected.textContent,value);assert.equal(nodes['metricOption_'+key].disabled,true);
-  assert.equal(posts.at(-1).path,'/display-settings');assert.deepEqual(posts.at(-1).body,{secondary_measurement:key});
- }
+ state={...state,connection:'Connected',age_seconds:0,reflected:0,input:21,gain_db:18.3};await vm.runInContext('refresh()',ctx);
+ // Reflected and input power each have their own bar meter; gain is a small reading. There is no meter picker any more.
+ assert.equal(nodes.secondaryLabel.textContent,'REFLECTED · W');assert.equal(nodes.reflected.textContent,'0');
+ assert.equal(nodes.inputLabel.textContent,'INPUT POWER · W');assert.equal(nodes.inputValue.textContent,'21');
+ assert.equal(nodes.key_gain_db.textContent,'18.3 dB');
  let finishSave;const oldFetch=ctx.fetch;ctx.fetch=()=>new Promise(resolve=>finishSave=resolve);
  const saving=nodes.save.onclick();assert.equal(nodes.save.disabled,true);assert.equal(nodes.save.textContent,'Saving…');assert.equal(nodes.settingsSaveStatus.textContent,'Saving settings…');
  finishSave({ok:true,json:async()=>({})});await saving;assert.equal(nodes.save.disabled,false);assert.equal(nodes.settingsSaveStatus.textContent,'Settings saved.');

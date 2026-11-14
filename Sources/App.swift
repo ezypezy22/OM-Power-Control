@@ -24,9 +24,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
         lockFD = Darwin.open(lockDirectory.appendingPathComponent("instance.lock").path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
         guard lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { NSApp.terminate(nil); return }
         configureMenus()
-        window = NSWindow(contentRect: NSRect(x: 0,y: 0,width: 900,height: 900), styleMask: [.titled,.closable,.miniaturizable,.resizable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0,y: 0,width: 1000,height: 620), styleMask: [.titled,.closable,.miniaturizable,.resizable], backing: .buffered, defer: false)
         window.title = "OM Power Control"
-        window.minSize = NSSize(width: 620,height: 620)
+        window.minSize = NSSize(width: 620,height: 560)
         window.center(); window.delegate = self
         window.setFrameAutosaveName("OM3501AMainWindow")
         ensureWindowVisible()
@@ -107,7 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
         window.title = "OM Power Control" + (small ? " · Compact" : "") + (onTop ? " · On top" : "")
         if small != compact {
             if small {
-                if window.frame.height >= 650 {
+                if window.frame.width >= 700 {
                     fullFrame = window.frame
                     UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: "OM3501AFullFrame")
                 } else if let stored = UserDefaults.standard.string(forKey: "OM3501AFullFrame") {
@@ -116,9 +116,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
                 window.minSize = NSSize(width: 380, height: 680)
                 window.setContentSize(NSSize(width: 400, height: 690))
             } else {
-                window.minSize = NSSize(width: 650, height: 650)
+                window.minSize = NSSize(width: 900, height: 560)
                 if let frame = fullFrame { window.setFrame(frame, display: true) }
-                else { window.setContentSize(NSSize(width: 900, height: 900)) }
+                else { window.setContentSize(NSSize(width: 1000, height: 620)) }
             }
             compact = small
             ensureWindowVisible()
