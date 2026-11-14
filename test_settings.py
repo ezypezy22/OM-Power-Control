@@ -26,8 +26,8 @@ class Tests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,{'OM_SETTINGS_PATH':str(Path(d)/'prefs.json')}):
    old={k:v for k,v in settings.DEFAULTS.items() if k!='model'}
    self.assertEqual(settings.validate(old)['model'],'OM-3501A')
-   m=Monitor();m.configure({**m.settings,'model':'om-4001a'})
-   self.assertEqual(settings.load()['model'],'OM-4001A')
+   m=Monitor();m.configure({**m.settings,'model':'om-4001c'})
+   self.assertEqual(settings.load()['model'],'OM-4001C')
    for action in ('toggle','on','off'):
     with self.assertRaisesRegex(ValueError,'Monitoring only'):m.command(action,'test-request-123')
    self.assertIsNone(m.controls.pending)

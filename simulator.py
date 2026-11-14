@@ -145,7 +145,7 @@ class Simulated4001A(SimulatedAmplifier):
                 if self.mode=='Off':self._start_warmup()
             elif data==b'Z':
                 self.sent.append(data);self.advance()
-                if self.mode in ('Standby','Operate'):self._start_cooldown()
+                if self.mode in ('Standby','Operate','Warming up'):self._start_cooldown()
             elif data==b'O' and self.mode not in ('Standby','Operate'):
                 # The amplifier answers O only when fully on.
                 self.sent.append(data);self.advance()

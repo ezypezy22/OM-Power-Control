@@ -15,7 +15,7 @@ FAULT_TITLES={'hv_fault':'High-voltage fault','hard_fault':'Hard fault'}
 IDENTIFY_SECONDS=5
 EXTRA_FIELDS=(*SLOW_FIELDS,'screen_ma','frequency_khz')
 HELD_FIELDS=(*SLOW_FIELDS,'frequency_khz')
-from controls import Controls
+from controls import Controls,blocked,BASIC_ACTIONS
 import settings
 from profiles import profile as model_profile,resolve as resolve_profile
 from collections import deque
@@ -193,7 +193,7 @@ class Monitor:
      if not duplicate:
       if self.mode_test_sent>=2:raise ValueError('Operate/Standby test is complete; further commands are blocked')
       if expected_mode!=('Standby' if self.mode_test_sent==0 else 'Operate'):raise ValueError('Mode test requires Standby to Operate, then Operate to Standby')
-    if not self.profile_now()['controls_verified']:raise ValueError('Monitoring only: controls are unverified for this model')
+    if blocked(self.control_state(),action):raise ValueError('Monitoring only: controls are unverified for this model' if action in BASIC_ACTIONS else 'Monitoring only: tuning is not verified for this model')
     duplicate=key in self.controls.seen if isinstance(key,str) else False
     self.controls.request(action,key,self.control_state(),expected_mode)
    except ValueError as exc:self.trace_command('rejected',pending,str(exc));raise
@@ -208,7 +208,7 @@ class Monitor:
   model_pending: the INFO reply has not arrived yet and the identification wait has not passed."""
   now=time.monotonic();fault,_=active_fault(self.state,now)
   pending=self.identify_until is not None and not self.state.get('info') and now<self.identify_until
-  return {**self.state,'fault_active':fault is not None,'controls_verified':self.profile_now()['controls_verified'] is True,'model_pending':pending}
+  return {**self.state,'fault_active':fault is not None,'controls_verified':self.profile_now()['controls_verified'] is True,'basic_controls':self.profile_now().get('basic_controls') is True,'model_pending':pending}
  def disconnect(self):
   with self.lock:
    self.stop.set()

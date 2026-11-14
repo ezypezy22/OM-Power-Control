@@ -20,10 +20,14 @@ class Tests(unittest.TestCase):
  def monitor(self,model):
   m=Monitor(simulate=True);m.settings['model']=model;now=time.monotonic()
   m.state={'connection':'Connected','_received':now,'status':'Standby','transmitting':False,'_field_times':{}};return m
- def test_4001a_controls_blocked_and_snapshot_carries_profile(self):
+ def test_4001a_has_basic_controls_but_no_tuning_and_snapshot_carries_profile(self):
   m=self.monitor('OM-4001A')
-  with self.assertRaisesRegex(ValueError,'Monitoring only'):m.command('toggle','request-4001a',expected_mode='Standby')
-  p=m.snapshot()['model_profile'];self.assertEqual((p['full_scale_w'],p['controls_verified']),(5000,False))
+  m.command('toggle','request-4001a',expected_mode='Standby');self.assertTrue(m.controls.pending)
+  t=self.monitor('OM-4001A');t.state['status']='Operate'
+  with self.assertRaisesRegex(ValueError,'Monitoring only: tuning'):t.command('autotune','request-4001a-tune')
+  p=m.snapshot()['model_profile'];self.assertEqual((p['full_scale_w'],p['controls_verified'],p['basic_controls']),(5000,False,True))
+  with self.assertRaisesRegex(ValueError,'Monitoring only'):self.monitor('OM-4001C').command('toggle','request-unknown',expected_mode='Standby')
+  self.assertFalse(profile('OM-4001C')['basic_controls'])
  def test_3501a_controls_still_accepted(self):
   m=self.monitor('OM-3501A');m.command('toggle','request-3501a',expected_mode='Standby');self.assertTrue(m.controls.pending)
 class GridSignTests(unittest.TestCase):
