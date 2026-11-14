@@ -1,3 +1,16 @@
+OM Power Control 0.1.34 for Mac
+
+- Adds amplifier-reported model, serial number, firmware and operating time; compact electrical readings; Load/Tune position percentages; cooling temperature; warning/fault displays.
+- Adds monitoring-only OM4001A display profiles and simulator; OM3501A operating controls remain supported.
+- Retries initial TCP connection failures for up to 60 seconds; operating commands and ended sessions are never automatically retried.
+- PTT-on status revokes older idle evidence, including during tuning. Idle-looking status alone cannot release the transmit latch.
+- Unsupported reported models remain monitoring-only regardless of saved label. Hard/high-voltage faults remain latched until reconnect after amplifier recovery; no automatic fault reset.
+- Auto-tune Start/Exit reflect fault and identification-wait restrictions. The separately permitted fault-time Stop action remains available.
+
+Validation: final PR revision: 295 Python tests (291 passed, four expected private-capture/Windows skips), all 7 JavaScript suites passed. User reports testing the OM3501A build and that it looks good; this is not exhaustive fault or full-range hardware validation. OM4001A operating controls remain blocked. Operator supplies/stops RF and sets drive power; the app never keys the radio.
+
+Apple Silicon, macOS 14 or later. Close the previous app before replacing it; one client owns the amplifier connection. Existing station settings are retained.
+
 OM Power Control 0.1.31 beta
 
 - Adds Dismiss to completed auto-tune exit banners, including restored defaults and stopped-tune outcomes. Dismissal survives monitoring updates; a new tune shows its result again.
