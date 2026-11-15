@@ -180,3 +180,14 @@ function autotunePresentation(s,pending=false){
  return {positions,stopDisabled:!!stopBlocked||!!(s.tune_test&&s.tune_test_counts?.['8']),phase,title,detail,visible:phase!=='idle',startDisabled:!!reason||active||s.status!=='Operate'||!!(s.tune_test&&s.tune_test_counts?.L),exitDisabled:!!reason||!!(s.tune_test&&s.tune_test_counts?.['*'])||(phase!=='waiting'&&!(phase==='aborted'&&['rf_lost','stop'].includes(s.autotune_abort_origin))),reason};
 }
 if(typeof module!=='undefined')module.exports.autotunePresentation=autotunePresentation;
+
+// Display gradient only; these color stops do not define amplifier protection limits.
+function swrReadout(s){
+ const valid=s.connection==='Connected'&&!(s.age_seconds>freshSeconds(s))&&s.transmitting===true&&Number.isFinite(s.forward)&&s.forward>0&&Number.isFinite(s.reflected)&&s.reflected>=0&&Number.isFinite(s.swr)&&s.swr>=1;
+ if(!valid)return {text:'—',color:'#a5b2b6'};
+ const stops=[[1,[121,213,179]],[1.5,[184,137,82]],[2,[229,103,88]]];
+ const value=Math.min(2,s.swr),i=value<=1.5?0:1;
+ const [low,a]=stops[i],[high,b]=stops[i+1],t=(value-low)/(high-low);
+ return {text:s.swr.toFixed(1)+':1',color:'rgb('+a.map((v,j)=>Math.round(v+(b[j]-v)*t)).join(', ')+')'};
+}
+if(typeof module!=='undefined')module.exports.swrReadout=swrReadout;

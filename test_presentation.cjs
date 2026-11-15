@@ -181,3 +181,10 @@ console.log('Selectable secondary-meter ranges and unavailable states pass');
 }
 
 {const e={...live,status:'Operate',model_profile:{controls_verified:false,basic_controls:true,experimental_tuning:true},settings:{model:'OM-4001A'}};assert.equal(require('./presentation.js').autotunePresentation(e).startDisabled,false);assert.equal(require('./presentation.js').autotunePresentation({...e,transmitting:true}).startDisabled,true);assert.equal(require('./presentation.js').autotunePresentation({...e,model_profile:{controls_verified:false}}).startDisabled,true);}
+
+{const swr=require('./presentation.js').swrReadout,active={connection:'Connected',age_seconds:0,transmitting:true,forward:100,reflected:4,swr:1};
+ assert.deepEqual(swr(active),{text:'1.0:1',color:'rgb(121, 213, 179)'});
+ assert.equal(swr({...active,swr:1.5}).color,'rgb(184, 137, 82)');assert.equal(swr({...active,swr:2}).color,'rgb(229, 103, 88)');assert.equal(swr({...active,swr:3}).color,'rgb(229, 103, 88)');
+ assert.equal(swr({...active,swr:1.25}).color,'rgb(153, 175, 131)');
+ for(const change of [{transmitting:false},{connection:'Stale'},{age_seconds:10},{swr:null},{swr:NaN},{forward:0},{reflected:null}])assert.deepEqual(swr({...active,...change}),{text:'—',color:'#a5b2b6'});
+ console.log('Prominent SWR: green/brown/red interpolation and neutral idle/stale/unavailable pass.');}

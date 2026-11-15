@@ -1,3 +1,5 @@
+Build 37: Prominent SWR beside forward power, green through brownish to red as SWR rises; idle/stale/unavailable readings show a neutral dash. Display colors are not amplifier protection thresholds.
+
 OM Power Control 0.1.35-om4001a.1 — experimental prerelease
 
 Based on PR #11 and released 0.1.34. Compact/horizontal display redesign. Upper-left amplifier headings omit the hyphen and prefer the actual reported model.
