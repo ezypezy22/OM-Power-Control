@@ -8,6 +8,8 @@ PROFILES={
  'OM3501A':{'tube_labels':['A','B'],'grid_separate':False,'grid_a_sign':1,'grid_b_sign':1,'hold_slow_readings':False,'screen_v_zero_while_warming':False,'fresh_seconds':3,'grid_zero_when_off':False,'name':'OM-3501A','basic_controls':True,'fan_control':True,'min_firmware':[3,16],'full_scale_w':3500,'reflected_max_w':500,'input_max_w':100,'screen_ma_range':[-60,60],'controls_verified':True},
  # Protocol per the manufacturer's rev.4 document (OM4001A matches OM3501A apart from two-tube values).
  # Meter ranges match the vendor's own client; controls stay locked until validated on hardware.
+ # OM-2501A: 2,500 W class, same protocol family. Monitoring only (no controls) until validated on hardware.
+ 'OM2501A':{'tube_labels':['A','B'],'grid_separate':False,'grid_a_sign':1,'grid_b_sign':1,'hold_slow_readings':False,'screen_v_zero_while_warming':False,'fresh_seconds':3,'grid_zero_when_off':False,'name':'OM-2501A','basic_controls':False,'fan_control':False,'min_firmware':[3,16],'full_scale_w':2500,'reflected_max_w':500,'input_max_w':100,'screen_ma_range':[-60,60],'controls_verified':False},
  'OM4001A':{'name':'OM-4001A','basic_controls':True,'fan_control':True,'min_firmware':[3,16],'full_scale_w':5000,'reflected_max_w':250,'input_max_w':100,'screen_ma_range':[-80,80],'controls_verified':False,
   # Tick labels and tube naming follow the vendor client (Ugrid f / Ugrid b, Uheat f / Uheat b).
   'forward_ticks_w':list(range(0,5000,400)),'reflected_ticks_w':list(range(0,251,50)),'input_ticks_w':list(range(0,91,10)),
