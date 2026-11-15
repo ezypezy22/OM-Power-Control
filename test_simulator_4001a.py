@@ -122,3 +122,12 @@ class ModelOptionTests(unittest.TestCase):
   self.assertLess(html.index('.connectRow[hidden]{display:none}'),html.index('.connectRow{display:flex'))
   self.assertIn('id="simExtras" hidden',html)
 if __name__=='__main__':unittest.main()
+
+class FanTests(unittest.TestCase):
+ def test_decoder_reads_the_fan_mode(self):
+  d=Decoder();d.feed(b'BLOWER:PTT;');self.assertEqual(d.state['fan_mode'],'ptt')
+  d.feed(b'BLOWER:ALWAYS;');self.assertEqual(d.state['fan_mode'],'always')
+ def test_simulators_report_and_change_the_fan_mode(self):
+  for sim in (Simulated4001A(),SimulatedAmplifier()):
+   sim.sendall(b'2');self.assertEqual(drain(sim),b'BLOWER:TEMP;')
+   sim.sendall(b'5');self.assertEqual(drain(sim),b'BLOWER:ALWAYS;')

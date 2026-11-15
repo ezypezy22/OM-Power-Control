@@ -54,6 +54,11 @@ function basicControls(s,whenUnknown){
 }
 if(typeof module!=='undefined'){module.exports.controlsVerified=controlsVerified;module.exports.basicControls=basicControls;}
 
+/* Auxiliary fan: the amplifier reports temp, ptt or always (BLOWER:x). Unknown until it has answered. */
+const FAN_NAMES={temp:'Temperature',ptt:'PTT',always:'Always on'};
+function fanLabel(s){return 'Fan: '+(FAN_NAMES[s.fan_mode]||'—')}
+if(typeof module!=='undefined')module.exports.fanLabel=fanLabel;
+
 function amplifierControls(s,localPending=false){
  const mode=s.status||'Unknown',c=s.control||{};
  let reason='',offWhileWarming=false;
@@ -77,7 +82,8 @@ function amplifierControls(s,localPending=false){
  return {reason,
   toggle:{label:mode==='Operate'?'Go to Standby':mode==='Standby'?'Go to Operate':'Toggle Operate / Standby',disabled:disabled||mode==='Off'||!!(s.tune_test&&s.tune_test_counts?.O>=2),expectedMode:['Operate','Standby'].includes(mode)?mode:null},
   on:{label:'Power on',disabled:disabled||!!s.tune_test||['On','Operate','Standby'].includes(mode)},
-  off:{label:'Power off',disabled:(disabled&&!offWhileWarming)||!!s.tune_test||mode==='Off'}
+  off:{label:'Power off',disabled:(disabled&&!offWhileWarming)||!!s.tune_test||mode==='Off'},
+  fan:{label:fanLabel(s),mode:s.fan_mode||null,supported:s.model_profile?.fan_control===true,disabled:disabled||!!s.tune_test||s.model_profile?.fan_control!==true||!s.fan_mode}
  };
 }
 if(typeof module!=='undefined')module.exports.amplifierControls=amplifierControls;
@@ -115,13 +121,22 @@ function forwardPowerMarks(s){
 function forwardPowerTicks(fullScale){return [0,1,2,3,4,5].map(i=>(fullScale*i/5).toLocaleString('en-US',{maximumFractionDigits:0})+(i===5?' W':''))}
 if(typeof module!=='undefined'){module.exports.forwardPowerClip=forwardPowerClip;module.exports.forwardPowerScale=forwardPowerScale;module.exports.forwardPowerTicks=forwardPowerTicks;module.exports.forwardPowerMarks=forwardPowerMarks;}
 
+// Theme colours for the meters (set by the page from the active theme; the dark defaults apply until then).
+let themePalette=null;
+function setThemePalette(p){themePalette=p}
+function paletteRgb(key,fallback){
+ const hex=String(themePalette?.[key]||'').match(/^#([0-9a-f]{6})/i);
+ return hex?[0,2,4].map(i=>parseInt(hex[1].slice(i,i+2),16)):fallback;
+}
+if(typeof module!=='undefined')module.exports.setThemePalette=setThemePalette;
+
 // Both readings describe the same mismatch. Color only fresh, active RF data.
 function mismatchColor(s){
- const neutral='#a5b2b6';
+ const neutral=themePalette?.neutral||'#a5b2b6';
  if(s.connection!=='Connected'||s.age_seconds>freshSeconds(s)||s.transmitting!==true||
     !Number.isFinite(s.forward)||s.forward<=0||!Number.isFinite(s.reflected)||s.reflected<0||
     !Number.isFinite(s.swr)||s.swr<1)return neutral;
- const stops=[[1,[121,213,179]],[1.5,[241,187,103]],[2,[229,103,88]]];
+ const stops=[[1,paletteRgb('ok',[121,213,179])],[1.5,paletteRgb('warn',[241,187,103])],[2,paletteRgb('bad',[229,103,88])]];
  const value=Math.min(2,s.swr),i=value<=1.5?0:1;
  const [low,a]=stops[i],[high,b]=stops[i+1],t=(value-low)/(high-low);
  return 'rgb('+a.map((v,j)=>Math.round(v+(b[j]-v)*t)).join(', ')+')';
@@ -160,7 +175,7 @@ function secondaryMeter(s,key='reflected'){
  const list={reflected:s.model_profile?.reflected_ticks_w,input:s.model_profile?.input_ticks_w}[key],custom=Array.isArray(list)&&list.length>1;
  const ticks=custom?list:[0,p.max/2,p.max];
  const tickMarks=ticks.map((v,i)=>({position:100*v/p.max,label:v.toLocaleString('en-US',{maximumFractionDigits:2})+(!custom&&i===ticks.length-1?' '+p.unit:'')}));
- return {...p,key,value,position,ticks,tickMarks,color:key==='reflected'?mismatchColor(s):value===null?'#a5b2b6':'#79d5b3'};
+ return {...p,key,value,position,ticks,tickMarks,color:key==='reflected'?mismatchColor(s):value===null?(themePalette?.neutral||'#a5b2b6'):(themePalette?.ok||'#79d5b3')};
 }
 if(typeof module!=='undefined'){module.exports.secondaryMeter=secondaryMeter;module.exports.SECONDARY_PROFILES=SECONDARY_PROFILES;}
 

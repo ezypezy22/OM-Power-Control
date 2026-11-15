@@ -253,7 +253,7 @@ class Monitor:
     # The data timeout starts when session setup completes, not before TCP/setup.
     received=time.monotonic()
     sock.sendall(b'?');sock.sendall(b'1')   # 1: one INFO request (model, firmware, hours) per connection
-    next_poll=0;next_frequency=0;next_status=time.monotonic()+2
+    fan_queried=False;next_poll=0;next_frequency=0;next_status=time.monotonic()+2
     with self.lock:self.state={'connection':'Waiting for amplifier data','_received':received};self.identify_until=received+IDENTIFY_SECONDS
     while not self.stop.is_set():
      now=time.monotonic()
@@ -284,6 +284,10 @@ class Monitor:
       next_status=now+2
      if now>=next_poll:
       sock.sendall(b'#');next_poll=now+1
+     if not fan_queried and not command and not (self.read_only or self.mode_test or self.power_test or self.readiness_test or self.tune_test) and dec.state.get('info') and not dec.state.get('transmitting'):
+      # 2: one read of the auxiliary fan mode per connection, once INFO shows the model has that command.
+      fan_queried=True
+      if resolve_profile(self.settings.get('model'),dec.state.get('info'))[0].get('fan_control') is True:sock.sendall(b'2')
      with self.lock:waiting=self.controls.pending is not None
      if now>=next_frequency and not command and not waiting and dec.state.get('autotune_phase') not in ('entered','waiting','tuning','unknown','aborted'):
       sock.sendall(b'F');next_frequency=now+5

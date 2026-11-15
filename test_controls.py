@@ -46,3 +46,18 @@ class Tests(unittest.TestCase):
   for action,status in [('on','Operate'),('on','Standby'),('on','On'),('off','Off')]:
    with self.assertRaises(ValueError):Controls().request(action,'request-123',self.state(status=status))
 if __name__=='__main__':unittest.main()
+
+class FanTests(unittest.TestCase):
+ def state(self,**kw):return {'connection':'Connected','_received':time.monotonic(),'status':'Standby','transmitting':False,**kw}
+ def test_fan_commands_send_the_documented_bytes_and_confirm_on_the_reply(self):
+  for action,wire,token in [('fan-temp',b'3','BLOWER:TEMP'),('fan-ptt',b'4','BLOWER:PTT'),('fan-always',b'5','BLOWER:ALWAYS')]:
+   c=Controls();s=self.state();c.request(action,'request-123',s);self.assertEqual(c.take(s),wire)
+   c.observe(['BLOWER:'+('TEMP' if token!='BLOWER:TEMP' else 'PTT')]);self.assertIsNotNone(c.pending)   # a different mode is not a confirmation
+   c.observe([token]);self.assertIsNone(c.pending);self.assertFalse(c.uncertain)
+ def test_fan_is_blocked_while_transmitting_or_counting_down_and_never_with_an_expected_mode(self):
+  for change in ({'transmitting':True},{'status':'Cooling down'},{'status':'Warming up'}):
+   with self.assertRaises(ValueError):Controls().request('fan-ptt','request-123',self.state(**change))
+  with self.assertRaises(ValueError):Controls().request('fan-ptt','request-123',self.state(),'Standby')
+ def test_fan_follows_the_basic_controls_gate(self):
+  with self.assertRaises(ValueError):Controls().request('fan-ptt','request-123',self.state(controls_verified=False))
+  Controls().request('fan-ptt','request-123',self.state(controls_verified=False,basic_controls=True))

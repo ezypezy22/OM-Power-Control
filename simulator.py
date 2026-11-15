@@ -10,7 +10,7 @@ class SimulatedAmplifier:
  def __init__(self):
   self.lock=threading.RLock();self.queue=bytearray();self.remote=False
   self.mode='Standby';self.rf=False;self.phase=None;self.abort_origin=None
-  self.started=0;self.transition=None;self.sent=[];self.scenario='success'
+  self.started=0;self.transition=None;self.sent=[];self.scenario='success';self.fan='TEMP'
  def emit(self,data):self.queue.extend(data)
  # Extra simulator controls a model supports; the page shows them only when listed.
  FEATURES=()
@@ -41,6 +41,9 @@ class SimulatedAmplifier:
     self.emit({'Operate':b'ST1110- SIMULATED ANTENNA;','Standby':b'ST1100- SIMULATED ANTENNA;','Off':b'ST2000- SIMULATED ANTENNA;','Warming up':b'WA3;','Cooling down':b'CO3;'}[self.mode])
     if not self.rf:self.emit(b'PTTOFF;')
    elif data==b'F':self.emit(b'FR14078;')
+   elif data in (b'2',b'3',b'4',b'5'):
+    if data!=b'2':self.fan={b'3':'TEMP',b'4':'PTT',b'5':'ALWAYS'}[data]
+    self.emit(b'BLOWER:%s;'%self.fan.encode())
    elif data==b'1':self.emit(b'INFO:0001,0000001,0,03.21,60,OM3501A;')
    elif data==b'#':
     self.emit(b'IP850;UP2900;US300;UGA75;UGB150;UHA12;UHB12;UM240;TE64;')

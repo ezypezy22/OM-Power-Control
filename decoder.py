@@ -119,6 +119,7 @@ class Decoder:
                 elif re.fullmatch(r'CT\d+',token):self.state.update(status='Cooling down',cooling_temp_c=int(token[2:]));self.state.pop('countdown',None)
                 elif token in FAULT_TOKENS or re.fullmatch(r'(WG|FA)\d+',token):self.set_alert(token)
                 elif token.startswith('INFO:'):self.set_info(token)
+                elif token in ('BLOWER:TEMP','BLOWER:PTT','BLOWER:ALWAYS'):self.state['fan_mode']=token[7:].lower();self.mark('fan_mode')
                 elif re.fullmatch(r'(WA|CO)\d+',token):self.state.pop('cooling_temp_c',None);self.state.update(status='Warming up' if token[:2]=='WA' else 'Cooling down',countdown=int(token[2:]))
                 elif token in ('PTTON','PTTOFF'):
                     if token=='PTTOFF':self.confirm_rf_idle('ptt-off-message')

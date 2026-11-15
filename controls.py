@@ -1,7 +1,8 @@
 """Single outstanding, non-retrying commands owned by the socket worker."""
 import time
-COMMANDS={'toggle':(b'O',{'OPERATE','STBY'}),'on':(b'Y',{'PAON','WA'}),'off':(b'Z',{'PAOFF','COON','CO'}),'autotune':(b'L',{'AUTO'}),'autotune-exit':(b'*',{'AUTOESC','SAVE DEFAULT'}),'autotune-stop':(b'8',{'STOP','AUTO:AUTOTUNE ABORTED'})}
-BASIC_ACTIONS=('toggle','on','off')
+COMMANDS={'toggle':(b'O',{'OPERATE','STBY'}),'on':(b'Y',{'PAON','WA'}),'off':(b'Z',{'PAOFF','COON','CO'}),'autotune':(b'L',{'AUTO'}),'autotune-exit':(b'*',{'AUTOESC','SAVE DEFAULT'}),'autotune-stop':(b'8',{'STOP','AUTO:AUTOTUNE ABORTED'}),'fan-temp':(b'3',{'BLOWER:TEMP'}),'fan-ptt':(b'4',{'BLOWER:PTT'}),'fan-always':(b'5',{'BLOWER:ALWAYS'})}
+FAN_ACTIONS=('fan-temp','fan-ptt','fan-always')   # auxiliary fan mode (OM-2501A/3501A/4001A; the OM-4001C has no such command)
+BASIC_ACTIONS=('toggle','on','off',*FAN_ACTIONS)
 ACTIVE_TUNE={'entered','waiting','tuning','unknown','aborted'}
 def tune_guard(action,state,stage=0):
  phase=state.get('autotune_phase')
@@ -22,7 +23,7 @@ def countdown_blocks(status,action):
 
 def blocked(state,action):
  """True when the model in force may not take this command: unverified models are monitoring only, except that
- a profile with basic_controls still allows Operate/Standby and power on/off (never tuning)."""
+ a profile with basic_controls still allows Operate/Standby, power on/off and the auxiliary fan mode (never tuning)."""
  return state.get('controls_verified') is False and not (state.get('basic_controls') is True and action in BASIC_ACTIONS)
 
 class Controls:
@@ -93,7 +94,7 @@ class Controls:
      self.pending=None;self.uncertain=True;self.message='Amplifier reported a different mode than requested. No retry was sent.';return
    defaults=action=='autotune-exit' and self.pending.get('exit_after_rf_abort')
    stopped_saved=defaults and self.pending.get('exit_abort_origin')=='stop' and 'SAVE USER' in tokens
-   self.pending=None;self.message={'toggle':'Operating mode confirmed by amplifier','on':'Power-on accepted by amplifier','off':'Shutdown accepted by amplifier','autotune-exit':'Automatic tuning exit confirmed','autotune-stop':'Auto-tune stopped by amplifier; stop RF manually'}[action]
+   self.pending=None;self.message={'toggle':'Operating mode confirmed by amplifier','on':'Power-on accepted by amplifier','off':'Shutdown accepted by amplifier','autotune-exit':'Automatic tuning exit confirmed','autotune-stop':'Auto-tune stopped by amplifier; stop RF manually','fan-temp':'Auxiliary fan set to temperature control','fan-ptt':'Auxiliary fan set to PTT control','fan-always':'Auxiliary fan set to always on'}[action]
    if defaults:self.message='Stopped tune exited; amplifier reported user settings saved, not successful tuning' if stopped_saved else 'Auto-tune exited; amplifier reported default settings saved'
  def tick(self):
   if self.pending and self.pending['sent'] is not None and time.monotonic()-self.pending['sent']>5:

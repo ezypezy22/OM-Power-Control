@@ -33,14 +33,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
         NotificationCenter.default.addObserver(self, selector: #selector(recoverForScreenChange(_:)), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         let config = WKWebViewConfiguration()
         config.userContentController.add(self, name: "displayWindow")
+        config.userContentController.add(self, name: "theme")
         let savedCompact=UserDefaults.standard.bool(forKey:"OMCompact")
         let savedTop=UserDefaults.standard.bool(forKey:"OMOnTop")
-        config.userContentController.addUserScript(WKUserScript(source:"window.omPreferences={compact:\(savedCompact),alwaysOnTop:\(savedTop)};",injectionTime:.atDocumentStart,forMainFrameOnly:true))
+        let savedTheme=AppDelegate.themeBackgrounds[UserDefaults.standard.string(forKey:"OMTheme") ?? ""] != nil ? UserDefaults.standard.string(forKey:"OMTheme")! : "dark"
+        config.userContentController.addUserScript(WKUserScript(source:"window.omPreferences={compact:\(savedCompact),alwaysOnTop:\(savedTop),theme:\"\(savedTheme)\"};",injectionTime:.atDocumentStart,forMainFrameOnly:true))
         let webData = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent(identifier)
         try? FileManager.default.createDirectory(at: webData, withIntermediateDirectories: true)
         web = WKWebView(frame: window.contentView!.bounds, configuration: config)
         web.uiDelegate = self; web.navigationDelegate = self
         web.autoresizingMask = [.width,.height]; window.contentView!.addSubview(web)
+        applyTheme(savedTheme)
         window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         launchReader()
     }
@@ -98,7 +101,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
         do { try task.run(); process = task }
         catch { showError("Could not start amplifier service: \(error.localizedDescription)") }
     }
+    // Page background and appearance for each theme; the window chrome follows the page theme.
+    static let themeBackgrounds: [String:(light:Bool,r:CGFloat,g:CGFloat,b:CGFloat)] = [
+        "dark":(false,0x11/255,0x16/255,0x19/255), "cb":(false,0x11/255,0x16/255,0x19/255),
+        "hc-dark":(false,0,0,0), "light":(true,0xee/255,0xf2/255,0xf4/255), "hc-light":(true,1,1,1)]
+    func applyTheme(_ name: String) {
+        guard let t = AppDelegate.themeBackgrounds[name] else { return }
+        let color = NSColor(srgbRed: t.r, green: t.g, blue: t.b, alpha: 1)
+        window.appearance = NSAppearance(named: t.light ? .aqua : .darkAqua)
+        window.backgroundColor = color
+        web.underPageBackgroundColor = color
+    }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "theme" {
+            if let body = message.body as? [String:Any], let name = body["theme"] as? String, AppDelegate.themeBackgrounds[name] != nil {
+                UserDefaults.standard.set(name, forKey: "OMTheme")
+                applyTheme(name)
+            }
+            return
+        }
         guard message.name == "displayWindow", let options = message.body as? [String:Any],
               let small = options["compact"] as? Bool, let onTop = options["alwaysOnTop"] as? Bool else { return }
         UserDefaults.standard.set(small,forKey:"OMCompact")
