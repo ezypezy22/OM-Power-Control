@@ -1,3 +1,13 @@
+OM Power Control 0.1.35-om4001a.1 — experimental prerelease
+
+Based on PR #11 and released 0.1.34. Compact/horizontal display redesign. Upper-left amplifier headings omit the hyphen and prefer the actual reported model.
+
+Explicit per-connection opt-in for unverified OM4001A basic controls and Auto Tune. Requires identified OM4001A firmware 3.16+, fresh confirmed idle, fault-free data, and operator acknowledgement. Off by default and resets on reconnect/restart. No experimental controls through DX Caliber.
+
+Review fixes preserve countdown inhibition and saved companion measurement. Existing transmit/fault/model/freshness checks, acknowledgement handling, Stop behavior and no-retry policy remain. No radio keying, drive changes or fault reset.
+
+Hardware validation pending. See TESTING-OM4001A.md.
+
 OM Power Control 0.1.34 for Mac
 
 - Adds amplifier-reported model, serial number, firmware and operating time; compact electrical readings; Load/Tune position percentages; cooling temperature; warning/fault displays.

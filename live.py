@@ -15,7 +15,7 @@ FAULT_TITLES={'hv_fault':'High-voltage fault','hard_fault':'Hard fault'}
 IDENTIFY_SECONDS=5
 EXTRA_FIELDS=(*SLOW_FIELDS,'screen_ma','frequency_khz')
 HELD_FIELDS=(*SLOW_FIELDS,'frequency_khz')
-from controls import Controls
+from controls import Controls,blocked,BASIC_ACTIONS
 import settings
 from profiles import profile as model_profile,resolve as resolve_profile
 from collections import deque
@@ -73,7 +73,7 @@ class Monitor:
   self.power_test=power_test;self.power_test_sent=0
   self.readiness_test=readiness_test;self.readiness_test_sent=0
   self.tune_test=tune_test;self.tune_test_counts={}
-  self.trace=trace;self.identify_until=None
+  self.trace=trace;self.identify_until=None;self.experimental_4001a=False
   if tune_test:self.settings['share_dxc']=False
   if simulate:
    from simulator import simulator_for
@@ -87,6 +87,9 @@ class Monitor:
   s['tune_test']=self.tune_test;s['tune_test_counts']={k.decode('ascii'):v for k,v in self.tune_test_counts.copy().items()}
   s['autotune_age_seconds']=round(now-field_times.get('autotune',now),1)
   profile,s['model_notice']=resolve_profile(s.get('settings',{}).get('model'),s.get('info'))
+  profile=self.experimental_profile(profile,s)
+  s['experimental_4001a']=profile.get('experimental_tuning') is True
+  if s['experimental_4001a']:s['model_notice']='EXPERIMENTAL OM4001A TEST: operating controls and Auto Tune are unverified on hardware. You supply and stop RF; the app never keys or adjusts the radio.'
   if s['connection']=='Connected' and age>profile['fresh_seconds']:s['connection']='Stale'
   measurement_received=s.pop('_measurement',None)
   measurement_age=now-(measurement_received if measurement_received is not None else 0)
@@ -129,7 +132,28 @@ class Monitor:
   if self.trace is not None:self.trace.record('decoded',stage=stage,tokens=decoder.tokens,buffer_bytes=len(decoder.buffer),measurement_revision=decoder.measurement_revision,transmitting=decoder.state.get('transmitting'),rf_idle_confirmed=decoder.state.get('rf_idle_confirmed'),rf_idle_source=decoder.state.get('rf_idle_source'),autotune_phase=decoder.state.get('autotune_phase'))
  def profile_now(self):
   """Profile in force: the model the amplifier reported, else the model label."""
-  return resolve_profile(self.settings.get('model','OM-3501A'),self.state.get('info'))[0]
+  return self.experimental_profile(resolve_profile(self.settings.get('model','OM-3501A'),self.state.get('info'))[0],self.state)
+ def experimental_profile(self,profile,state):
+  # Permission is session-only and requires the actual amplifier's model and supported firmware.
+  info=state.get('info') or {};parts=str(info.get('firmware','')).split('.')
+  firmware_ok=len(parts)==2 and all(p.isdigit() for p in parts) and tuple(map(int,parts))>=(3,16)
+  identified=str(info.get('model','')).upper().replace('-','')=='OM4001A'
+  if self.experimental_4001a and identified and firmware_ok and state.get('connection')=='Connected':
+   return {**profile,'basic_controls':True,'experimental_tuning':True}
+  return profile
+ def configure_experimental(self,value):
+  if not isinstance(value,dict) or set(value)!={'enabled','acknowledgement'} or type(value['enabled']) is not bool:raise ValueError('Invalid experimental test choice')
+  with self.lock:
+   if self.read_only or self.mode_test or self.power_test or self.readiness_test or self.tune_test:raise ValueError('Experimental controls are unavailable in restricted access modes')
+   if self.controls.pending or self.controls.uncertain or self.state.get('autotune_phase') in ('entered','waiting','tuning','unknown','aborted'):raise ValueError('Finish and exit automatic tuning before changing experimental permission')
+   if value['enabled']:
+    if value['acknowledgement']!='I accept unverified OM4001A controls and Auto Tune':raise ValueError('Acknowledge unverified OM4001A hardware testing')
+    prior=self.experimental_4001a;self.experimental_4001a=True
+    p=self.profile_now();self.experimental_4001a=prior
+    if not p.get('experimental_tuning'):raise ValueError('Connect an identified OM4001A with firmware 3.16 or newer first')
+    now=time.monotonic();fault,_=active_fault(self.state,now)
+    if now-self.state.get('_received',0)>3 or fault is not None or self.state.get('transmitting') or self.state.get('rf_idle_confirmed') is not True:raise ValueError('Fresh, confirmed RF-idle, fault-free amplifier data is required')
+   self.experimental_4001a=value['enabled']
  def settle(self):
   """Let a session that is closing finish, so settings and a new connection do not race its shutdown."""
   thread=self.thread
@@ -144,7 +168,7 @@ class Monitor:
    if self.readiness_test and self.readiness_test_sent:raise ValueError('Readiness test already sent a command; reconnecting cannot reauthorize the test')
    if self.tune_test and self.tune_test_counts:raise ValueError('RF tune test already sent a command; reconnecting cannot reauthorize the test')
    if not self.settings['host']:raise ValueError('Set and save the amplifier address before connecting')
-   self.stop.clear();self.controls=Controls();self.state={'connection':'Connecting'}
+   self.experimental_4001a=False;self.stop.clear();self.controls=Controls();self.state={'connection':'Connecting'}
    if self.simulate:
     from simulator import simulator_for
     self.simulator=simulator_for(self.settings.get('model'))
@@ -193,7 +217,8 @@ class Monitor:
      if not duplicate:
       if self.mode_test_sent>=2:raise ValueError('Operate/Standby test is complete; further commands are blocked')
       if expected_mode!=('Standby' if self.mode_test_sent==0 else 'Operate'):raise ValueError('Mode test requires Standby to Operate, then Operate to Standby')
-    if not self.profile_now()['controls_verified']:raise ValueError('Monitoring only: controls are unverified for this model')
+    if source!='standalone' and self.profile_now().get('experimental_tuning'):raise ValueError('Experimental OM4001A controls are available only in the standalone app')
+    if blocked(self.control_state(),action):raise ValueError('Monitoring only: controls are unverified for this model' if action in BASIC_ACTIONS else 'Monitoring only: tuning is not verified for this model')
     duplicate=key in self.controls.seen if isinstance(key,str) else False
     self.controls.request(action,key,self.control_state(),expected_mode)
    except ValueError as exc:self.trace_command('rejected',pending,str(exc));raise
@@ -208,10 +233,10 @@ class Monitor:
   model_pending: the INFO reply has not arrived yet and the identification wait has not passed."""
   now=time.monotonic();fault,_=active_fault(self.state,now)
   pending=self.identify_until is not None and not self.state.get('info') and now<self.identify_until
-  return {**self.state,'fault_active':fault is not None,'controls_verified':self.profile_now()['controls_verified'] is True,'model_pending':pending}
+  return {**self.state,'fault_active':fault is not None,'controls_verified':self.profile_now()['controls_verified'] is True,'basic_controls':self.profile_now().get('basic_controls') is True,'experimental_tuning':self.profile_now().get('experimental_tuning') is True,'model_pending':pending}
  def disconnect(self):
   with self.lock:
-   self.stop.set()
+   self.experimental_4001a=False;self.stop.set()
    if self.thread and self.thread.is_alive():self.state={'connection':'Disconnecting'}
  def run(self):
   retry_until=time.monotonic()+CONNECT_RETRY_SECONDS
@@ -365,6 +390,10 @@ class Handler(BaseHTTPRequestHandler):
     elif 'alert' in value:simulator.inject(value['alert'])
     else:simulator.set_input(value['rf'],value.get('scenario','success'))
    except (ValueError,TypeError,KeyError) as e:
+    self.send(409,json.dumps({'error':str(e)}).encode());return
+  elif self.path=='/experimental-4001a':
+   try:self.server.monitor.configure_experimental(json.loads(payload))
+   except (ValueError,TypeError) as e:
     self.send(409,json.dumps({'error':str(e)}).encode());return
   elif self.path in ('/settings','/display-settings'):
    try:

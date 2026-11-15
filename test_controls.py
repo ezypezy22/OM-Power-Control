@@ -15,6 +15,12 @@ class Tests(unittest.TestCase):
   for change in [{'transmitting':True},{'status':'Warming up'},{'status':'Cooling down'},{'connection':'Disconnected'},{'_received':time.monotonic()-5}]:
    c=Controls()
    with self.assertRaises(ValueError):c.request('toggle','request-123',self.state(**change))
+ def test_countdowns_block_every_basic_action_and_recheck_before_send(self):
+  for status in ('Warming up','Cooling down'):
+   for action in ('toggle','on','off'):
+    with self.assertRaises(ValueError):Controls().request(action,'countdown-'+action,self.state(status=status))
+   c=Controls();c.request('off','queued-before-countdown',self.state(status='Standby'))
+   self.assertIsNone(c.take(self.state(status=status)));self.assertIsNone(c.pending)
  def test_transmit_after_queue(self):
   c=Controls();c.request('toggle','request-123',self.state());self.assertIsNone(c.take(self.state(transmitting=True)));self.assertIsNone(c.pending)
  def test_loss_never_requeues(self):

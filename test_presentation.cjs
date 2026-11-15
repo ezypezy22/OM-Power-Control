@@ -21,9 +21,10 @@ assert.equal(c({...live,status:'Standby'}).toggle.expectedMode,'Standby');
 assert.equal(c({...live,status:'Unknown'}).toggle.expectedMode,null);
 for(const status of ['Operate','Standby','On'])assert.equal(c({...live,status}).on.disabled,true);
 assert.equal(c({...live,status:'Off'}).off.disabled,true);
+for(const status of ['Warming up','Cooling down']){const w=c({...live,status});for(const key of ['toggle','on','off'])assert.equal(w[key].disabled,true);}
 assert.equal(c({...live,status:'Off'}).on.disabled,false);
 assert.equal(c({...live,status:'Off'}).toggle.disabled,true);
-for(const extra of [{transmitting:true},{transmitting:null,rf_state_unknown:true},{connection:'Stale'},{age_seconds:4},{control:{pending:true}},{control:{uncertain:true}},{control:{cooldown_remaining:1}},{status:'Warming up'},{status:'Cooling down'}]){
+for(const extra of [{transmitting:true},{transmitting:null,rf_state_unknown:true},{connection:'Stale'},{age_seconds:4},{control:{pending:true}},{control:{uncertain:true}},{control:{cooldown_remaining:1}},{status:'Cooling down'}]){
  const v=c({...live,status:'Standby',...extra});for(const key of ['toggle','on','off'])assert.equal(v[key].disabled,true);assert.ok(v.reason);
 }
 console.log('Control labels and availability checks passed');
@@ -121,6 +122,10 @@ console.log('Selectable secondary-meter ranges and unavailable states pass');
  assert.equal(cv(m4,true),false);assert.equal(cv(m3,false),true);assert.equal(cv({settings:{model:'OM-3501A'}},false),true);assert.equal(cv({settings:{model:'X'}},true),false);assert.equal(cv({},true),true);assert.equal(cv({},false),false);
  const up={...live,age_seconds:0,status:'Standby'};
  assert.equal(ctl({...up,...m4}).toggle.disabled,true);assert.match(ctl({...up,...m4}).reason,/Monitoring only/);assert.equal(ctl({...up,...m3}).toggle.disabled,false);
+ // basic_controls opens Operate/Standby and power on/off for a model like the OM-4001A, but not tuning.
+ const m4b={model_profile:{controls_verified:false,basic_controls:true,full_scale_w:5000},settings:{model:'OM-4001A'}};
+ assert.equal(ctl({...up,...m4b}).toggle.disabled,false);assert.equal(ctl({...up,...m4b,status:'Off'}).on.disabled,false);assert.equal(ctl({...up,...m4b}).off.disabled,false);
+ assert.equal(tune({...up,...m4b,status:'Operate'}).startDisabled,true);
  assert.equal(tune({...up,...m4,status:'Operate'}).startDisabled,true);assert.equal(tune({...up,...m3,status:'Operate'}).startDisabled,false);
  console.log('Model profile presentation checks passed');
 }
@@ -174,3 +179,5 @@ console.log('Selectable secondary-meter ranges and unavailable states pass');
  console.log('About amplifier checks passed');
 }
 }
+
+{const e={...live,status:'Operate',model_profile:{controls_verified:false,basic_controls:true,experimental_tuning:true},settings:{model:'OM-4001A'}};assert.equal(require('./presentation.js').autotunePresentation(e).startDisabled,false);assert.equal(require('./presentation.js').autotunePresentation({...e,transmitting:true}).startDisabled,true);assert.equal(require('./presentation.js').autotunePresentation({...e,model_profile:{controls_verified:false}}).startDisabled,true);}

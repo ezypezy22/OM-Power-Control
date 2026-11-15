@@ -44,10 +44,15 @@ if(typeof module!=='undefined')Object.assign(module.exports,{amplifierPresentati
 /* Operating commands need a model whose controls were validated on hardware (profiles.py). Without
    a server-supplied profile, fall back to the OM-3501A name check; whenUnknown covers a missing model. */
 function controlsVerified(s,whenUnknown){
- if(s.model_profile)return s.model_profile.controls_verified===true;
+ if(s.model_profile)return s.model_profile.controls_verified===true||s.model_profile.experimental_tuning===true;
  const model=s.settings?.model;return model?model==='OM-3501A':whenUnknown;
 }
-if(typeof module!=='undefined')module.exports.controlsVerified=controlsVerified;
+/* Operate/Standby and power on/off only need basic_controls; tuning still needs controlsVerified. */
+function basicControls(s,whenUnknown){
+ if(s.model_profile)return s.model_profile.controls_verified===true||s.model_profile.basic_controls===true;
+ return controlsVerified(s,whenUnknown);
+}
+if(typeof module!=='undefined'){module.exports.controlsVerified=controlsVerified;module.exports.basicControls=basicControls;}
 
 function amplifierControls(s,localPending=false){
  const mode=s.status||'Unknown',c=s.control||{};
@@ -56,7 +61,7 @@ function amplifierControls(s,localPending=false){
  else if(s.power_test)reason='Restricted power-cycle test: commands are managed by the test; Operate and tuning are blocked.';
  else if(s.mode_test)reason='Restricted Operate/Standby test: commands are managed by the test; power and tuning are blocked.';
  else if(s.read_only)reason='Read-only telemetry: operating and tuning commands are blocked.';
- else if(!controlsVerified(s,true))reason='Monitoring only: controls are unverified for this model.';
+ else if(!basicControls(s,true))reason='Monitoring only: controls are unverified for this model.';
  else if(s.fault)reason='Amplifier fault active: commands are blocked. '+s.fault.text;
  else if(s.model_pending)reason='Waiting for the amplifier to report its model before enabling controls.';
  else if(s.connection!=='Connected'||s.age_seconds>freshSeconds(s))reason='Connect and wait for fresh amplifier data to use controls.';
@@ -65,7 +70,8 @@ function amplifierControls(s,localPending=false){
  else if(['entered','waiting','tuning','unknown','aborted'].includes(s.autotune_phase))reason='Automatic tuning active; use its controls below.';
  else if(s.rf_state_unknown)reason='RF state is unconfirmed. Keep RF off and check the amplifier; controls remain paused.';
  else if(s.transmitting)reason='Stop transmission before changing amplifier state.';
- else if(mode==='Cooling down'||mode==='Warming up')reason='Wait for the amplifier countdown to finish.';
+ else if(mode==='Cooling down')reason='Wait for the amplifier countdown to finish.';
+ else if(mode==='Warming up')reason='Wait for the amplifier countdown to finish.';
  else if(c.cooldown_remaining>0)reason='Waiting briefly before another command.';
  const disabled=!!reason;
  return {reason,

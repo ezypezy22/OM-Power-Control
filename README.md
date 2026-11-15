@@ -23,7 +23,7 @@ The first public build is intended as a beta. Hardware verification so far cover
 - Expandable measurements: input power, plate current/voltage, screen current/voltage, grid voltage, heater voltages, mains voltage, temperature and calculated gain. Unavailable or stale telemetry is shown as a dash.
 - Saved display selector under Measurements: replace the reflected-power panel with input power, plate current or calculated gain, each with its own units and bar scale. The current choice is disabled in the menu.
 - SWR and reflected readings share a blended green/amber/red mismatch color; idle or unavailable readings are neutral.
-- Editable amplifier model label. OM-3501A is tested. OM-4001A is supported for monitoring only: it uses the vendor client's meter ranges (5000 W forward, 250 W reflected, 100 W input, ±80 mA screen current) and its scale marks and tube naming follow the vendor client (grid and heater voltages shown separately as f and b), and its operating commands stay blocked until validated on a real amplifier. Other model names use the 3500 W scale, also monitoring only. The model label selects display scale and control gating (see profiles.py); it does not select a different protocol.
+- Editable amplifier model label. OM-3501A is tested. OM-4001A has validated monitoring; operating controls remain disabled pending hardware validation: it uses the vendor client's meter ranges (5000 W forward, 250 W reflected, 100 W input, ±80 mA screen current) and its scale marks and tube naming follow the vendor client (grid and heater voltages shown separately as f and b). Other model names use the 3500 W scale, also monitoring only. The model label selects display scale and control gating (see profiles.py); it does not select a different protocol.
 - Operate/Standby, normal shutdown/cooling, and power-on/warm-up.
 - Automatic tuning with amplifier-confirmed readiness, live measurements, successful completion/automatic saving, Exit and Stop. The operator sets drive power and supplies/stops RF; the app never keys or adjusts the radio.
 - Separate results for RF-interrupted/default-settings recovery and settings saved after Stop. Unexpected replies, delayed status and unconfirmed commands never count as successful tuning.
@@ -41,7 +41,7 @@ The first public build is intended as a beta. Hardware verification so far cover
 
 The initial binary targets Apple Silicon Macs and macOS 14 or later. Older macOS versions, Intel Macs, Windows, other amplifier models and additional firmware revisions need separate builds/testing. Set the amplifier IP address and TCP port in Connection & station, save, then Connect. No USB connection is used. Configure the amplifier's network interface using its manufacturer instructions. Your callsign, address and preferences stay on your computer; they are not part of the download.
 
-Use the amplifier within its manufacturer operating requirements and your station limits. The software preserves the normal cooling and warm-up sequences. Disconnecting or quitting closes remote communication; it does not turn the amplifier off. The amplifier's own protections remain responsible for hardware protection. The app does not implement antenna switching or fault-reset controls. Auto-tune is verified on the tested OM-3501A; other models remain monitoring only.
+Use the amplifier within its manufacturer operating requirements and your station limits. The software preserves the normal cooling and warm-up sequences. Disconnecting or quitting closes remote communication; it does not turn the amplifier off. The amplifier's own protections remain responsible for hardware protection. The app does not implement antenna switching or fault-reset controls. Auto-tune is verified only on the tested OM-3501A; OM-4001A and other models remain monitoring only in release builds. Dedicated, clearly labeled OM4001A hardware-test builds may enable unverified Operate/Standby and power on/off for operator testing. All commands remain blocked during warm-up and cooling; auto-tune stays blocked on OM4001A.
 
 ## Protocol status
 
@@ -65,7 +65,7 @@ python3 -m venv .venv
 OM_BUILD_PYTHON="$PWD/.venv/bin/python" scripts/build.sh
 ```
 
-The current Mac release is 0.1.34 beta. Its DMG is Developer ID signed, notarized and stapled.
+The stable Mac release remains 0.1.34 beta. This branch prepares 0.1.35-om4001a.1, an experimental prerelease for OM4001A hardware testing; hardware validation is pending.
 
 The default local signature is ad hoc. To sign your own build, set OM_SIGN_IDENTITY to your Developer ID Application identity. Public binary distribution additionally needs a timestamped hardened-runtime signing pass, notarization, stapling and clean-machine installation testing. The build script is a local development build, not the complete public-release pipeline.
 
@@ -94,3 +94,11 @@ Exit works while waiting. Stop can interrupt an active tune, but the operator mu
 An unanswered Exit was observed in the Windows client during one Stop test. The Mac app sends a command once, reports uncertainty on timeout, and does not retry automatically. Unknown replies and delayed communication require operator review; do not assume tuning succeeded.
 
 Live checks covered successful tuning and saving, waiting-state Exit, RF-release abort/default restoration, and Stop/Exit/user-settings acknowledgment on one OM-3501A. Other failure conditions have not been deliberately induced. Local packet captures are optional tests and are not distributed.
+
+## OM4001A experimental prerelease
+
+This prerelease includes PR #11’s display redesign and review fixes. The upper-left heading shows OM3501A or OM4001A without a hyphen, preferring the amplifier-reported model. Saving connection settings preserves the DX Caliber measurement preference. All commands remain blocked during warm-up and cooling.
+
+OM4001A defaults to monitoring only. After connecting an identified OM4001A with firmware 3.16 or newer, open Settings and choose **Enable experimental OM4001A testing**. Confirm the unverified hardware-testing warning. Fresh, confirmed RF-idle, fault-free communication is required. This enables standalone Operate/Standby, power and Auto Tune for that connection only. Permission resets on reconnect/app restart, cannot be changed during an active or uncertain tune, and is unavailable in restricted access modes. DX Caliber cannot enable or use experimental controls.
+
+The app never keys the radio or changes drive power. Follow the manufacturer’s tuning instructions and station limits; the operator supplies and stops RF manually. No minimum drive threshold has been inferred from the protocol. Unknown, delayed or interrupted replies are not successful tuning. No automatic retry or fault reset is added. Hardware behavior, including OM4001A tuning acknowledgements and completion, is unverified. See TESTING-OM4001A.md.
