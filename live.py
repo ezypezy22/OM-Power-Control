@@ -201,13 +201,20 @@ class Monitor:
      password=admin_password.read()
      if password is None:raise ValueError('No admin password is saved; enter it')
     if needs_password and not password and key not in self.controls.seen:raise ValueError('Enter the admin password to unlock tuning')
-    self.controls.request(action,key,self.control_state(),expected_mode,password if needs_password else None,stored=bool(use_saved or remember))
+    self.controls.request(action,key,self.control_state(),expected_mode,password if needs_password else None,stored=bool(use_saved))
     if needs_password and password and remember and not use_saved and not duplicate:
-     try:admin_password.save(password)
-     except (ValueError,OSError):pass
+     self.controls.pending['remember_password']=password
    except ValueError as exc:self.trace_command('rejected',pending,str(exc));raise
    if self.controls.pending and not duplicate:self.controls.pending['source']=pending['source']
    self.trace_command('duplicate ignored' if duplicate else 'queued',pending,self.controls.message)
+ def observe_controls(self,tokens):
+  pending=self.controls.pending
+  candidate=pending.get('remember_password') if pending and pending.get('unlock')==1 and pending.get('sent') is not None else None
+  self.controls.observe(tokens)
+  if candidate and self.controls.pending is pending and pending.get('unlock')==2:
+   pending.pop('remember_password',None)
+   try:admin_password.save(candidate)
+   except (ValueError,OSError):pass
  def control_state(self):
   """State handed to Controls, rechecked on every request and again immediately before a queued command is sent.
 
@@ -217,7 +224,7 @@ class Monitor:
   model_pending: the INFO reply has not arrived yet and the identification wait has not passed."""
   now=time.monotonic();fault,_=active_fault(self.state,now)
   pending=self.identify_until is not None and not self.state.get('info') and now<self.identify_until
-  return {**self.state,'fault_active':fault is not None,'controls_verified':self.profile_now()['controls_verified'] is True,'basic_controls':self.profile_now().get('basic_controls') is True,'stop_exits_tuning':self.profile_now().get('stop_exits_tuning') is True,'model_pending':pending}
+  return {**self.state,'fault_active':fault is not None,'controls_verified':self.profile_now()['controls_verified'] is True,'basic_controls':self.profile_now().get('basic_controls') is True,'stop_exits_tuning':self.profile_now().get('stop_exits_tuning') is True,'tune_password':self.profile_now().get('tune_password') is True,'model_pending':pending}
  def disconnect(self):
   with self.lock:
    self.stop.set()
@@ -324,7 +331,7 @@ class Monitor:
       for key,count in dec.field_revisions.items():
        if field_revisions.get(key)!=count:field_times[key]=received
       with self.lock:
-       previous=self.controls.pending;self.controls.observe(dec.tokens)
+       previous=self.controls.pending;self.observe_controls(dec.tokens)
        if self.controls.rejected_stored:self.controls.rejected_stored=False;admin_password.forget()   # a wrong stored password must not be sent again
        if previous and self.controls.pending is None:self.trace_command('uncertain' if self.controls.uncertain else 'confirmed',previous,self.controls.message)
        self.state={**updates[-1],'connection':'Connected','_received':received,'_measurement':measurement,'_field_times':dict(field_times)}
@@ -420,7 +427,7 @@ def main():
  hardware=a.hardware or a.read_only
  from instance_lock import InstanceLock,READER_MUTEX
  if not hardware:os.environ.setdefault('OM_SETTINGS_PATH',str(settings.data_directory()/'simulation-settings.json'))
- lock=InstanceLock(settings.data_directory()/'instance.lock',name=READER_MUTEX)
+ lock=InstanceLock(settings.location().parent/'instance.lock',name=READER_MUTEX)
  trace=None
  if a.trace:
   if not hardware:p.error('--trace needs --read-only or --hardware')

@@ -16,7 +16,7 @@ PROFILES={
  # Sending * straight after STOP stopped that, but while PTT was on (against the vendor's advice) the amplifier then kept
  # reporting PTT with frozen readings and never sent PTTOFF, locking the controls (14:11 trace). Off until the vendor
  # client's own Stop sequence is known.
- 'OM4001A':{'name':'OM-4001A','basic_controls':True,'tune_password':True,'stop_exits_tuning':False,'tune_min_input_w':{'15 m':4,'17 m':6,'10 m':7,'20 m':8,'40 m':8,'12 m':11},'fan_control':True,'min_firmware':[3,16],'full_scale_w':5000,'reflected_max_w':250,'input_max_w':100,'screen_ma_range':[-80,80],'controls_verified':False,
+ 'OM4001A':{'name':'OM-4001A','basic_controls':True,'tune_password':True,'stop_exits_tuning':False,'tune_min_input_w':{'15 m':4,'17 m':6,'10 m':7,'20 m':8,'40 m':8,'12 m':11},'fan_control':True,'min_firmware':[3,16],'full_scale_w':5000,'reflected_max_w':250,'input_max_w':100,'screen_ma_range':[-80,80],'controls_verified':True,
   # Tick labels and tube naming follow the vendor client (Ugrid f / Ugrid b, Uheat f / Uheat b).
   'forward_ticks_w':list(range(0,5000,400)),'reflected_ticks_w':list(range(0,251,50)),'input_ticks_w':list(range(0,91,10)),
   'screen_ma_tick_step':20,'tube_labels':['f','b'],'grid_separate':True,

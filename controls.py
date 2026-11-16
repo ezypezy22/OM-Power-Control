@@ -21,9 +21,8 @@ def tune_guard(action,state,stage=0):
  return None
 
 def countdown_blocks(status,action):
- """A warm-up or cool-down countdown blocks commands, except Power off while warming up (it cancels the warm-up,
- as the vendor client allows)."""
- return status=='Cooling down' or (status=='Warming up' and action!='off')
+ """Preserve the prerelease countdown guard for all models."""
+ return status in ('Cooling down','Warming up')
 
 def blocked(state,action):
  """True when the model in force may not take this command: unverified models are monitoring only, except that
@@ -63,6 +62,7 @@ class Controls:
   # was queued may have selected a monitoring-only profile.
   if blocked(state,self.pending['action']):reason='the amplifier reported a model whose controls are unverified (monitoring only)'
   elif state.get('model_pending'):reason='the amplifier has not reported its model yet'
+  elif self.pending['action']=='autotune' and state.get('tune_password') is True and self.pending.get('unlock') is None:reason='the identified amplifier requires an admin password; start tuning again'
   elif state.get('fault_active') and self.pending['action']!='autotune-stop':reason='amplifier fault is active'
   elif state.get('transmitting') and self.pending['action']!='autotune-stop':reason='amplifier is transmitting'
   elif state.get('connection')!='Connected' or time.monotonic()-state.get('_received',0)>3:reason='fresh amplifier data is unavailable'

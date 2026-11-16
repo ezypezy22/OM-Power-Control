@@ -57,6 +57,6 @@ class EngineTests(unittest.TestCase):
    time.sleep(.1)
   self.assertFalse(admin_password.exists());self.assertIn('rejected',self.m.snapshot()['control']['message'])
  def test_a_wrong_typed_password_leaves_a_good_saved_one_alone(self):
-  admin_password.save('0000000000');self.tune(password='wrong');time.sleep(.3)
+  admin_password.save('0000000000');self.tune(password='wrong',remember=True);time.sleep(.3)
   self.assertEqual(admin_password.read(),'0000000000')
 if __name__=='__main__':unittest.main()

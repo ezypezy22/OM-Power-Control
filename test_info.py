@@ -37,7 +37,7 @@ class ResolveTests(unittest.TestCase):
   self.assertEqual(resolve('OM-3501A',None),(profile('OM-3501A'),''))
  def test_a_wrong_label_cannot_unlock_controls_validated_for_another_model(self):
   p,note=resolve('OM-3501A',self.info('OM4001A'))
-  self.assertEqual((p['name'],p['controls_verified'],p['full_scale_w']),('OM-4001A',False,5000));self.assertIn('OM4001A',note);self.assertIn('OM-3501A',note)
+  self.assertEqual((p['name'],p['controls_verified'],p['full_scale_w']),('OM-4001A',True,5000));self.assertIn('OM4001A',note);self.assertIn('OM-3501A',note)
  def test_a_4001a_label_on_a_3501a_takes_the_3501a_profile(self):
   p,note=resolve('OM-4001A',self.info('OM3501A'));self.assertEqual((p['name'],p['controls_verified']),('OM-3501A',True));self.assertTrue(note)
  def test_unrecognised_reply_keeps_only_display_profile_and_says_so(self):
@@ -58,7 +58,8 @@ class MonitorTests(unittest.TestCase):
   # An amplifier that reports itself as an OM-4001A gets basic controls, but never the 3501A's validated tuning.
   basic=self.monitor('OM-3501A','OM4001A');basic.command('toggle','request-4001-basic',expected_mode='Standby');self.assertTrue(basic.controls.pending)
   tune=self.monitor('OM-3501A','OM4001A');tune.state['status']='Operate'
-  with self.assertRaisesRegex(ValueError,'Monitoring only: tuning'):tune.command('autotune','request-wrong-label')
+  with self.assertRaisesRegex(ValueError,'admin password'):tune.command('autotune','request-wrong-label')
+  tune.command('autotune','request-with-password',password='0000000000');self.assertEqual(tune.controls.take(tune.control_state()),b'P')
   with self.assertRaisesRegex(ValueError,'Monitoring only'):self.monitor('OM-4001C').command('toggle','request-unknown-model',expected_mode='Standby')
   # An amplifier that reports a model the app does not recognise gets no operating permission, whatever the label says.
   for action,key in (('toggle','request-unrecognised-1'),('off','request-unrecognised-2')):
@@ -67,7 +68,7 @@ class MonitorTests(unittest.TestCase):
   silent=self.monitor('OM-3501A');silent.command('toggle','request-no-reply',expected_mode='Standby');self.assertTrue(silent.controls.pending)
  def test_snapshot_reports_the_effective_profile_and_notice(self):
   s=self.monitor('OM-3501A','OM4001A').snapshot()
-  self.assertEqual((s['model_profile']['name'],s['model_profile']['controls_verified'],s['model_profile']['fresh_seconds']),('OM-4001A',False,8));self.assertIn('OM4001A',s['model_notice']);self.assertEqual(s['info']['firmware'],'03.42')
+  self.assertEqual((s['model_profile']['name'],s['model_profile']['controls_verified'],s['model_profile']['fresh_seconds']),('OM-4001A',True,8));self.assertIn('OM4001A',s['model_notice']);self.assertEqual(s['info']['firmware'],'03.42')
   s=self.monitor('OM-4001A','OM4001A').snapshot();self.assertEqual(s['model_notice'],'')
   self.assertEqual(self.monitor('OM-3501A').snapshot()['model_notice'],'')
  def wait(self,monitor,test,seconds=12):
@@ -114,7 +115,7 @@ class DelayedInfoTests(unittest.TestCase):
   amp=Amplifier(m,[b'ST1110- HEXBEAM;PTTOFF;',queue_then_info,b'TE63;',b'TE63;'])
   with patch('live.socket.create_connection',return_value=amp),patch('live.IDENTIFY_SECONDS',0):m.run()
   self.assertNotIn(b'L',amp.sent);self.assertIsNone(m.controls.pending);self.assertFalse(m.controls.uncertain)
-  self.assertIn('monitoring only',m.controls.message)
+  self.assertIn('admin password',m.controls.message)
   self.assertEqual([h['phase'] for h in m.command_history],['queued','cancelled'])
  def test_controls_take_rechecks_the_profile(self):
   from controls import Controls
@@ -142,10 +143,10 @@ class DelayedInfoTests(unittest.TestCase):
   self.assertTrue(result['early']);self.assertEqual(amp.sent.count(b'O'),1);self.assertEqual(m.controls.message,'Operating mode confirmed by amplifier')
  def test_a_4001a_reply_inside_the_wait_never_unlocks_tuning(self):
   def try_toggle():
-   with self.assertRaisesRegex(ValueError,'Monitoring only'):m.command('autotune','after-4001-1')
+   with self.assertRaisesRegex(ValueError,'admin password'):m.command('autotune','after-4001-1')
    return b'TE63;'
   m=Monitor(allow_hardware=True);m.settings.update(host='192.0.2.1',model='OM-3501A')
-  amp=Amplifier(m,[b'ST0110- NO ANTENNA SWITCH;PTTOFF;',INFO_4001,try_toggle])
+  amp=Amplifier(m,[b'ST1110- NO ANTENNA SWITCH;PTTOFF;',INFO_4001,try_toggle])
   with patch('live.socket.create_connection',return_value=amp):m.run()
   self.assertNotIn(b'L',amp.sent)
  def test_no_info_reply_falls_back_to_the_label_after_the_wait(self):

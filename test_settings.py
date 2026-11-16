@@ -47,3 +47,12 @@ class Tests(unittest.TestCase):
   for v in ({**settings.DEFAULTS,'port':0},{**settings.DEFAULTS,'host':'bad/host'},{**settings.DEFAULTS,'port':True}):
    with self.assertRaises(ValueError):settings.validate(v)
 if __name__=='__main__':unittest.main()
+
+class SharedMeasurementPreservationTests(unittest.TestCase):
+ def test_unrelated_settings_save_preserves_companion_measurement(self):
+  from live import Monitor
+  with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,{'OM_SETTINGS_PATH':str(Path(d)/'prefs.json')}):
+   m=Monitor();m.configure_display({'secondary_measurement':'input'})
+   m.configure({'callsign':'W1AW'})
+   self.assertEqual(m.settings['secondary_measurement'],'input')
+   self.assertEqual(settings.load()['secondary_measurement'],'input')

@@ -44,7 +44,7 @@ if(typeof module!=='undefined')Object.assign(module.exports,{amplifierPresentati
 /* Operating commands need a model whose controls were validated on hardware (profiles.py). Without
    a server-supplied profile, fall back to the OM-3501A name check; whenUnknown covers a missing model. */
 function controlsVerified(s,whenUnknown){
- if(s.model_profile)return s.model_profile.controls_verified===true;
+ if(s.model_profile)return s.model_profile.controls_verified===true||s.model_profile.experimental_tuning===true;
  const model=s.settings?.model;return model?model==='OM-3501A':whenUnknown;
 }
 /* Operate/Standby and power on/off only need basic_controls; tuning still needs controlsVerified. */
@@ -76,7 +76,7 @@ function amplifierControls(s,localPending=false){
  else if(s.rf_state_unknown)reason='RF state is unconfirmed. Keep RF off and check the amplifier; controls remain paused.';
  else if(s.transmitting)reason=Number.isFinite(s.input)&&s.input>0?'Unkey your radio first: the amplifier still sees '+Math.round(s.input)+' W input. Standby and power controls return when RF stops.':'Stop transmission before changing amplifier state.';
  else if(mode==='Cooling down')reason='Wait for the amplifier countdown to finish.';
- else if(mode==='Warming up'){reason='Warming up: only Power off is available, to cancel the warm-up.';offWhileWarming=true}
+ else if(mode==='Warming up')reason='Wait for the amplifier countdown to finish.';
  else if(c.cooldown_remaining>0)reason='Waiting briefly before another command.';
  const disabled=!!reason;
  return {reason,
@@ -209,3 +209,14 @@ function autotunePresentation(s,pending=false){
  return {positions,gauges,stopDisabled:!!stopBlocked||!!(s.tune_test&&s.tune_test_counts?.['8']),phase,title,detail,visible:phase!=='idle',startDisabled:!!reason||active||s.status!=='Operate'||!!(s.tune_test&&s.tune_test_counts?.L),exitDisabled:!!reason||!!(s.tune_test&&s.tune_test_counts?.['*'])||(phase!=='waiting'&&!(phase==='aborted'&&['rf_lost','stop'].includes(s.autotune_abort_origin))),reason};
 }
 if(typeof module!=='undefined')module.exports.autotunePresentation=autotunePresentation;
+
+// Display gradient only; these color stops do not define amplifier protection limits.
+function swrReadout(s){
+ const valid=s.connection==='Connected'&&!(s.age_seconds>freshSeconds(s))&&s.transmitting===true&&Number.isFinite(s.forward)&&s.forward>0&&Number.isFinite(s.reflected)&&s.reflected>=0&&Number.isFinite(s.swr)&&s.swr>=1;
+ if(!valid)return {text:'—',color:'#a5b2b6'};
+ const stops=[[1,[121,213,179]],[1.5,[184,137,82]],[2,[229,103,88]]];
+ const value=Math.min(2,s.swr),i=value<=1.5?0:1;
+ const [low,a]=stops[i],[high,b]=stops[i+1],t=(value-low)/(high-low);
+ return {text:s.swr.toFixed(1)+':1',color:'rgb('+a.map((v,j)=>Math.round(v+(b[j]-v)*t)).join(', ')+')'};
+}
+if(typeof module!=='undefined')module.exports.swrReadout=swrReadout;
