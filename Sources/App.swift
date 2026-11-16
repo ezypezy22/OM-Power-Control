@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
         guard lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { NSApp.terminate(nil); return }
         configureMenus()
         window = NSWindow(contentRect: NSRect(x: 0,y: 0,width: 1000,height: 620), styleMask: [.titled,.closable,.miniaturizable,.resizable], backing: .buffered, defer: false)
-        window.title = "OM Power Control · Prerelease 2"
+        window.title = "OM Power Control · Prerelease 3"
         window.minSize = NSSize(width: 620,height: 560)
         window.center(); window.delegate = self
         window.setFrameAutosaveName("OMPR11TestMainWindow")
@@ -131,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
         UserDefaults.standard.set(small,forKey:"OMCompact")
         UserDefaults.standard.set(onTop,forKey:"OMOnTop")
         window.level = onTop ? .floating : .normal
-        window.title = "OM Power Control · Prerelease 2" + (small ? " · Compact" : "") + (onTop ? " · On top" : "")
+        window.title = "OM Power Control · Prerelease 3" + (small ? " · Compact" : "") + (onTop ? " · On top" : "")
         if small != compact {
             if small {
                 if window.frame.width >= 700 {

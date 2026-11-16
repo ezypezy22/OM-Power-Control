@@ -1,3 +1,7 @@
+0.1.35 prerelease 3 — build 43
+
+Fixes false Auto-tune sound alerts during normal transmission after canceling or completing a tune. A current tune alarm remains active until fresh RF-off confirmation. Confirmed Exit auto-tune dismisses the waiting banner and tuning window; uncertain exits retain warnings. All prerelease2 password and display fixes are retained.
+
 0.1.35 prerelease 2 — build 41
 
 Integrates PR #11 at c9eeec7 with 0.1.35 prerelease 1 and the reviewed password/settings/countdown fixes. Preserves prominent SWR. Enables OM4001A Auto Tune based on operator report, with admin password accepted before remembering. Adds themes, fan controls, tuning dialog and OM2501A monitoring. Compact callsign wrapping fixed; LIVE edge glow and Operate pulse removed; LIVE LED pulse retained; About amplifier dismisses on outside click. Separate preview settings; no automatic equipment connection on first use.
