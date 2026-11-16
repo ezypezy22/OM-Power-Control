@@ -197,11 +197,12 @@ class Monitor:
     if blocked(self.control_state(),action):raise ValueError('Monitoring only: controls are unverified for this model' if action in BASIC_ACTIONS else 'Monitoring only: tuning is not verified for this model')
     duplicate=key in self.controls.seen if isinstance(key,str) else False
     needs_password=action=='autotune' and self.profile_now().get('tune_password') is True
-    if needs_password and not password and use_saved:
+    from_saved=bool(needs_password and use_saved and not password)   # only a password read from the file counts as the saved one
+    if from_saved:
      password=admin_password.read()
      if password is None:raise ValueError('No admin password is saved; enter it')
     if needs_password and not password and key not in self.controls.seen:raise ValueError('Enter the admin password to unlock tuning')
-    self.controls.request(action,key,self.control_state(),expected_mode,password if needs_password else None,stored=bool(use_saved))
+    self.controls.request(action,key,self.control_state(),expected_mode,password if needs_password else None,stored=from_saved)
     if needs_password and password and remember and not use_saved and not duplicate:
      self.controls.pending['remember_password']=password
    except ValueError as exc:self.trace_command('rejected',pending,str(exc));raise
