@@ -16,7 +16,7 @@ IDENTIFY_SECONDS=5
 EXTRA_FIELDS=(*SLOW_FIELDS,'screen_ma','frequency_khz')
 HELD_FIELDS=(*SLOW_FIELDS,'frequency_khz')
 from controls import Controls,blocked,BASIC_ACTIONS
-import settings
+import settings,admin_password
 from profiles import profile as model_profile,resolve as resolve_profile
 from collections import deque
 from session_protocol import amplifier_session
@@ -83,6 +83,7 @@ class Monitor:
   field_times=s.pop('_field_times',{})
   now=time.monotonic();age=now-s.pop('_received',now)
   s['age_seconds']=round(age,1)
+  s['admin_password_saved']=admin_password.exists()
   s['sim_features']=list(self.simulator.FEATURES) if self.simulate and self.simulator else []
   s['tune_test']=self.tune_test;s['tune_test_counts']={k.decode('ascii'):v for k,v in self.tune_test_counts.copy().items()}
   s['autotune_age_seconds']=round(now-field_times.get('autotune',now),1)
@@ -161,7 +162,7 @@ class Monitor:
   with self.lock:self.settings=settings.save({**self.settings,**value})
  def trace_command(self,phase,pending,message=''):
   if pending:self.command_history.append({'time':round(time.time(),3),'phase':phase,'source':pending.get('source','standalone'),'action':pending.get('action'),'id':pending.get('id'),'message':message[:300]})
- def command(self,action,key,expected_mode=None,source='standalone',password=None):
+ def command(self,action,key,expected_mode=None,source='standalone',password=None,use_saved=False,remember=False):
   with self.lock:
    pending={'action':str(action)[:20],'id':str(key)[:100],'source':'DXC' if source=='DXC' else 'standalone'}
    try:
@@ -195,8 +196,15 @@ class Monitor:
       if expected_mode!=('Standby' if self.mode_test_sent==0 else 'Operate'):raise ValueError('Mode test requires Standby to Operate, then Operate to Standby')
     if blocked(self.control_state(),action):raise ValueError('Monitoring only: controls are unverified for this model' if action in BASIC_ACTIONS else 'Monitoring only: tuning is not verified for this model')
     duplicate=key in self.controls.seen if isinstance(key,str) else False
-    if action=='autotune' and self.profile_now().get('tune_password') is True and not password and key not in self.controls.seen:raise ValueError('Enter the admin password to unlock tuning')
-    self.controls.request(action,key,self.control_state(),expected_mode,password if self.profile_now().get('tune_password') is True else None)
+    needs_password=action=='autotune' and self.profile_now().get('tune_password') is True
+    if needs_password and not password and use_saved:
+     password=admin_password.read()
+     if password is None:raise ValueError('No admin password is saved; enter it')
+    if needs_password and not password and key not in self.controls.seen:raise ValueError('Enter the admin password to unlock tuning')
+    self.controls.request(action,key,self.control_state(),expected_mode,password if needs_password else None,stored=bool(use_saved or remember))
+    if needs_password and password and remember and not use_saved and not duplicate:
+     try:admin_password.save(password)
+     except (ValueError,OSError):pass
    except ValueError as exc:self.trace_command('rejected',pending,str(exc));raise
    if self.controls.pending and not duplicate:self.controls.pending['source']=pending['source']
    self.trace_command('duplicate ignored' if duplicate else 'queued',pending,self.controls.message)
@@ -314,6 +322,7 @@ class Monitor:
        if field_revisions.get(key)!=count:field_times[key]=received
       with self.lock:
        previous=self.controls.pending;self.controls.observe(dec.tokens)
+       if self.controls.rejected_stored:self.controls.rejected_stored=False;admin_password.forget()   # a wrong stored password must not be sent again
        if previous and self.controls.pending is None:self.trace_command('uncertain' if self.controls.uncertain else 'confirmed',previous,self.controls.message)
        self.state={**updates[-1],'connection':'Connected','_received':received,'_measurement':measurement,'_field_times':dict(field_times)}
   except Exception as e:
@@ -358,6 +367,7 @@ class Handler(BaseHTTPRequestHandler):
    except ValueError as e:
     self.send(409,json.dumps({'error':str(e)}).encode());return
   elif self.path=='/disconnect':self.server.monitor.disconnect()
+  elif self.path=='/admin-password/forget':admin_password.forget()
   elif self.path=='/simulation':
    try:
     if not self.server.monitor.simulate:raise ValueError('Simulation controls are disabled in hardware mode')
@@ -386,7 +396,7 @@ class Handler(BaseHTTPRequestHandler):
     size=int(self.headers.get('Content-Length','0'))
     if size>1024:raise ValueError('Request too large')
     value=json.loads(payload)
-    self.server.monitor.command(self.path.rsplit('/',1)[-1],value.get('id'),value.get('expected_mode'),password=value.get('password'))
+    self.server.monitor.command(self.path.rsplit('/',1)[-1],value.get('id'),value.get('expected_mode'),password=value.get('password'),use_saved=value.get('use_saved') is True,remember=value.get('remember') is True)
    except (ValueError,TypeError,AttributeError) as e:
     self.send(409,json.dumps({'error':str(e)}).encode());return
   else:self.send(404,b'{}');return

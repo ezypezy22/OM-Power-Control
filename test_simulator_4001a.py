@@ -152,3 +152,15 @@ class OffsetTests(unittest.TestCase):
   d=Decoder();d.feed(b'OT10;OT100;');self.assertEqual(d.state['autotune_offset_raw'],100)
   sim=SimulatedAmplifier();sim.phase='tuning';sim.rf=True;sim.started=time.monotonic()-3;sim.sendall(b'#');d=Decoder();d.feed(drain(sim))
   self.assertTrue(40<=d.state['autotune_offset_raw']<=100)
+
+class LowInputPromptTests(unittest.TestCase):
+ def test_increase_input_prompt_keeps_the_tune_waiting_and_reports_the_minimum(self):
+  d=Decoder();d.feed(b'AUTO;AUTO:WAITING FOR INPUT POWER;')
+  d.feed(b'AUTO:INCREASE INPUT POWER ABOVE 8.0W!;')
+  self.assertEqual(d.state['autotune_phase'],'waiting');self.assertTrue(d.state['autotune_low_input']);self.assertEqual(d.state['autotune_min_input_w'],8.0)
+  d.feed(b'AUTO:AUTOTUNE IN PROGRESS;');self.assertEqual(d.state['autotune_phase'],'tuning');self.assertFalse(d.state['autotune_low_input'])
+ def test_prompt_is_accepted_as_the_reply_to_preparing_the_tune(self):
+  from controls import Controls
+  s={'connection':'Connected','_received':time.monotonic(),'status':'Operate','transmitting':False}
+  c=Controls();c.request('autotune','request-123',s);c.take(s);c.observe(['AUTO']);s['autotune_phase']='entered';self.assertEqual(c.take(s),b'&')
+  c.observe(['AUTO:INCREASE INPUT POWER ABOVE 8.0W!']);self.assertIsNone(c.pending);self.assertFalse(c.uncertain)

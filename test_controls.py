@@ -92,3 +92,24 @@ class RejectionCountTests(unittest.TestCase):
   c=Controls();self.assertEqual(c.view()['password_rejections'],0)
   c.request('autotune','request-123',s,password='bad');c.take(s);c.observe(['ACK']);c.take(s);c.observe(['PSWFAIL'])
   self.assertEqual(c.view()['password_rejections'],1)
+
+class SlowStopTests(unittest.TestCase):
+ """The amplifier moves its capacitors before answering Stop; a slow but genuine STOP must not lock the controls."""
+ def setUp(self):self.now=[1000.0];self.p=patch('controls.time.monotonic',lambda:self.now[0]);self.p.start()
+ def tearDown(self):self.p.stop()
+ def state(self,**kw):return {'connection':'Connected','_received':self.now[0],'status':'Operate','transmitting':False,'autotune_phase':'tuning',**kw}
+ def test_stop_confirmed_after_seven_seconds_is_not_uncertain(self):
+  c=Controls();s=self.state();c.request('autotune-stop','request-123',s);self.assertEqual(c.take(s),b'8')
+  self.now[0]+=7;c.tick();self.assertIsNotNone(c.pending);self.assertFalse(c.uncertain)
+  c.observe(['STOP','AUTO:AUTOTUNE ABORTED']);self.assertIsNone(c.pending);self.assertFalse(c.uncertain)
+ def test_a_very_late_stop_still_clears_the_lock(self):
+  c=Controls();s=self.state();c.request('autotune-stop','request-123',s);c.take(s)
+  self.now[0]+=16;c.tick();self.assertTrue(c.uncertain)
+  self.now[0]+=3;c.observe(['STOP']);self.assertFalse(c.uncertain);self.assertIn('late',c.message)
+ def test_late_window_expires_and_unrelated_replies_do_not_clear_it(self):
+  c=Controls();s=self.state();c.request('autotune-stop','request-123',s);c.take(s)
+  self.now[0]+=16;c.tick();c.observe(['TE60','AUTOESC']);self.assertTrue(c.uncertain)
+  self.now[0]+=31;c.observe(['STOP']);self.assertTrue(c.uncertain)
+ def test_other_commands_keep_the_five_second_rule(self):
+  c=Controls();s=self.state(status='Standby',autotune_phase=None);c.request('toggle','request-123',s);c.take(s)
+  self.now[0]+=6;c.tick();self.assertTrue(c.uncertain);c.observe(['OPERATE']);self.assertTrue(c.uncertain)

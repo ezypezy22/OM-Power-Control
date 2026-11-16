@@ -2,6 +2,10 @@
 import time
 COMMANDS={'toggle':(b'O',{'OPERATE','STBY'}),'on':(b'Y',{'PAON','WA'}),'off':(b'Z',{'PAOFF','COON','CO'}),'autotune':(b'L',{'AUTO'}),'autotune-exit':(b'*',{'AUTOESC','SAVE DEFAULT'}),'autotune-stop':(b'8',{'STOP','AUTO:AUTOTUNE ABORTED'}),'fan-temp':(b'3',{'BLOWER:TEMP'}),'fan-ptt':(b'4',{'BLOWER:PTT'}),'fan-always':(b'5',{'BLOWER:ALWAYS'})}
 FAN_ACTIONS=('fan-temp','fan-ptt','fan-always')   # auxiliary fan mode (OM-2501A/3501A/4001A; the OM-4001C has no such command)
+# Seconds to wait for confirmation. Stop and Exit move the tuning capacitors before the amplifier answers, so they get longer.
+TIMEOUTS={'autotune-stop':15,'autotune-exit':15}
+# A Stop or Exit confirmation that arrives after its window still settles the result, within this many seconds.
+LATE_SECONDS=30
 BASIC_ACTIONS=('toggle','on','off',*FAN_ACTIONS)
 ACTIVE_TUNE={'entered','waiting','tuning','unknown','aborted'}
 def tune_guard(action,state,stage=0):
@@ -27,8 +31,8 @@ def blocked(state,action):
  return state.get('controls_verified') is False and not (state.get('basic_controls') is True and action in BASIC_ACTIONS)
 
 class Controls:
- def __init__(self):self.pending=None;self.message='';self.uncertain=False;self.seen=set();self.last_sent=float('-inf');self.last_secret=False;self.rejections=0
- def request(self,action,key,state,expected_mode=None,password=None):
+ def __init__(self):self.pending=None;self.message='';self.uncertain=False;self.seen=set();self.last_sent=float('-inf');self.last_secret=False;self.rejections=0;self.rejected_stored=False;self.late=None
+ def request(self,action,key,state,expected_mode=None,password=None,stored=False):
   now=time.monotonic()
   if action not in COMMANDS:raise ValueError('Unknown control')
   if not isinstance(key,str) or not 8<=len(key)<=100:raise ValueError('Invalid request identifier')
@@ -51,7 +55,7 @@ class Controls:
   if action!='autotune-stop' and now-self.last_sent<2:raise ValueError('Please wait before sending another command')
   self.seen.add(key)
   if len(self.seen)>1000:raise ValueError('Reconnect before sending additional commands')
-  self.pending={'id':key,'action':action,'password':password,'unlock':0 if password is not None else None,'sent':None,'expected_mode':expected_mode,'exit_after_rf_abort':action=='autotune-exit' and state.get('autotune_phase')=='aborted','exit_abort_origin':state.get('autotune_abort_origin') if action=='autotune-exit' and state.get('autotune_phase')=='aborted' else None};self.message='Command queued'
+  self.pending={'id':key,'action':action,'password':password,'stored':bool(stored and password is not None),'unlock':0 if password is not None else None,'sent':None,'expected_mode':expected_mode,'exit_after_rf_abort':action=='autotune-exit' and state.get('autotune_phase')=='aborted','exit_abort_origin':state.get('autotune_abort_origin') if action=='autotune-exit' and state.get('autotune_phase')=='aborted' else None};self.message='Command queued'
  def take(self,state):
   if not self.pending or self.pending['sent'] is not None:return None
   reason=None
@@ -79,14 +83,22 @@ class Controls:
    secret=self.pending['password'];self.pending['password']=None;self.last_secret=True;self.message='Password sent once; waiting for the amplifier'
    return secret.encode('ascii')+b';'
   return b'&' if self.pending['action']=='autotune' and self.pending.get('stage')==1 else COMMANDS[self.pending['action']][0]
+ @staticmethod
+ def _wanted(p):
+  if p['action']=='autotune-exit':return {'SAVE USER','SAVE DEFAULT'} if p.get('exit_abort_origin')=='stop' else {'SAVE DEFAULT'} if p.get('exit_after_rf_abort') else {'AUTOESC'}
+  return COMMANDS[p['action']][1]
  def observe(self,tokens):
+  if not self.pending and self.uncertain and self.late and time.monotonic()<self.late['until'] and any(t in self._wanted(self.late['pending']) for t in tokens):
+   # The amplifier did confirm, only late (it was still moving the capacitors): the result is known after all.
+   action=self.late['pending']['action'];self.late=None;self.uncertain=False
+   self.message={'autotune-stop':'Auto-tune stop confirmed by amplifier (late); stop RF manually','autotune-exit':'Automatic tuning exit confirmed by amplifier (late)'}[action];return
   if not self.pending or self.pending['sent'] is None:return
   action=self.pending['action']
   if action=='autotune' and self.pending.get('unlock') in (0,1):
    if self.pending['unlock']==0:
     if 'NAK' in tokens:self.pending=None;self.message='Amplifier is not ready for the admin password. No retry was sent.'
     elif 'ACK' in tokens:self.pending.update(unlock=1,sent=None);self.message='Amplifier ready for the admin password'
-   elif 'PSWFAIL' in tokens:self.pending=None;self.rejections+=1;self.message='Amplifier rejected the admin password. No retry was sent.'
+   elif 'PSWFAIL' in tokens:self.rejected_stored=bool(self.pending.get('stored'));self.pending=None;self.rejections+=1;self.message='Amplifier rejected the admin password. No retry was sent.'+(' The saved password was removed; enter it again.' if self.rejected_stored else '')
    elif 'POK' in tokens:self.pending.update(unlock=2,sent=None);self.message='Admin mode unlocked; entering automatic tuning'
    return
   if action in ('autotune','autotune-exit','autotune-stop') and 'BADPSW' in tokens:
@@ -95,12 +107,12 @@ class Controls:
   if action=='autotune':
    if self.pending.get('stage',0)==0 and 'AUTO' in tokens:
     self.pending.update(stage=1,sent=None);self.message='Automatic mode acknowledged; preparing tuning';return
-   if self.pending.get('stage')==1 and 'AUTO:WAITING FOR INPUT POWER' in tokens:
+   if self.pending.get('stage')==1 and ('AUTO:WAITING FOR INPUT POWER' in tokens or any(t.startswith('AUTO:INCREASE INPUT POWER ABOVE') for t in tokens)):
     self.pending=None;self.message='Automatic tuning ready; operator supplies tuning RF';return
    if any(t.startswith('AUTO') for t in tokens):
     self.pending=None;self.uncertain=True;self.message='Unexpected automatic-tuning response. Check amplifier; no retry was sent.'
    return
-  wanted=({'SAVE USER','SAVE DEFAULT'} if self.pending.get('exit_abort_origin')=='stop' else {'SAVE DEFAULT'} if self.pending.get('exit_after_rf_abort') else {'AUTOESC'}) if action=='autotune-exit' else COMMANDS[action][1]
+  wanted=self._wanted(self.pending)
   if any(t in wanted or (t.startswith('WA') and 'WA' in wanted and t[2:].isdigit()) or (t.startswith('CO') and 'CO' in wanted and t[2:].isdigit()) for t in tokens):
    action=self.pending['action']
    expected=self.pending.get('expected_mode')
@@ -114,7 +126,8 @@ class Controls:
    self.pending=None;self.message={'toggle':'Operating mode confirmed by amplifier','on':'Power-on accepted by amplifier','off':'Shutdown accepted by amplifier','autotune-exit':'Automatic tuning exit confirmed','autotune-stop':'Auto-tune stopped by amplifier; stop RF manually','fan-temp':'Auxiliary fan set to temperature control','fan-ptt':'Auxiliary fan set to PTT control','fan-always':'Auxiliary fan set to always on'}[action]
    if defaults:self.message='Stopped tune exited; amplifier reported user settings saved, not successful tuning' if stopped_saved else 'Auto-tune exited; amplifier reported default settings saved'
  def tick(self):
-  if self.pending and self.pending['sent'] is not None and time.monotonic()-self.pending['sent']>5:
+  if self.pending and self.pending['sent'] is not None and time.monotonic()-self.pending['sent']>TIMEOUTS.get(self.pending['action'],5):
+   if self.pending['action'] in TIMEOUTS:self.late={'pending':self.pending,'until':time.monotonic()+LATE_SECONDS}
    self.pending=None;self.uncertain=True;self.message='No command confirmation. It may have taken effect; no retry was sent. Reconnect to reassess.'
  def lost(self):
   if self.pending:

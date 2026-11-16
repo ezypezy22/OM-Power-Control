@@ -28,6 +28,13 @@ a band has been measured at least twice, or confirmed from the manual.
 - Stop RF immediately on any alert, a rising reflected power or SWR, or an unexpected message.
 - If the tune does not start at a drive you are comfortable with, stop and record "no start at N W".
 
+## The amplifier states the minimum itself
+
+When the drive is too low the amplifier keeps waiting and sends `AUTO:INCREASE INPUT POWER ABOVE 8.0W!` (seen on 40 m, 2026-11-16).
+The app shows that figure in the popup ("Increase input to 8 W") and treats it as authoritative; the table below is only a
+fallback shown before the amplifier has said anything. The measured 40 m value (8 W) matches. Note the wording is
+*above* 8.0 W, and the amplifier reports whole watts, so the real threshold may sit just over the figure.
+
 ## Results
 
 | Band | Date | Firmware | Antenna / SWR | Tune began at (W) | Highest (W) | Result | Notes |
