@@ -140,7 +140,8 @@ class Simulated4001A(SimulatedAmplifier):
             if data==b'?':
                 self.sent.append(data);self.advance()
                 code={'Operate':b'ST0111' if self.rf else b'ST0110','Standby':b'ST0100'}.get(self.mode,b'ST0000')
-                self.emit(code+self.ANTENNA)
+                # The last status flag is 0 in automatic tuning mode, - otherwise (vendor rev.4).
+                self.emit(code+(b'0'+self.ANTENNA[1:] if self.phase in ('entered','waiting','tuning','aborted','unknown') else self.ANTENNA))
             elif data==b'#':
                 self.sent.append(data);self.advance();now=self.clock()
                 # The amplifier answers this poll only about every 3.2 s, however often it is sent.
@@ -154,6 +155,9 @@ class Simulated4001A(SimulatedAmplifier):
             elif self.expect_password and data.endswith(b';'):
                 self.sent.append(b'<password>');self.advance();self.expect_password=False;self.admin=data[:-1]==self.password
                 self.emit(b'POK;' if self.admin else b'PSWFAIL;')
+            elif data==b'*' and self.phase in ('entered','waiting','tuning','aborted','unknown'):
+                # Real OM-4001A (2026-11-16 trace): Exit leaves tuning mode with PTTOFF only, no AUTOESC or SAVE text.
+                self.sent.append(data);self.advance();self.phase=None;self.abort_origin=None;self.emit(b'PTTOFF;')
             elif data==b'L' and not self.admin:self.sent.append(data);self.advance();self.emit(b'BADPSW;')
             elif data==b'F':self.sent.append(data);self.advance();self.emit(b'FR18100;')
             elif data==b'1':self.sent.append(data);self.advance();self.emit(b'INFO:0001,0000001,0000002,03.42,55756,OM4001A;')

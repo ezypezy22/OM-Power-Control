@@ -74,7 +74,7 @@ function amplifierControls(s,localPending=false){
  else if(localPending||c.pending)reason='Waiting for amplifier confirmation…';
  else if(['entered','waiting','tuning','unknown','aborted'].includes(s.autotune_phase))reason='Automatic tuning active; use its controls below.';
  else if(s.rf_state_unknown)reason='RF state is unconfirmed. Keep RF off and check the amplifier; controls remain paused.';
- else if(s.transmitting)reason='Stop transmission before changing amplifier state.';
+ else if(s.transmitting)reason=Number.isFinite(s.input)&&s.input>0?'Unkey your radio first: the amplifier still sees '+Math.round(s.input)+' W input. Standby and power controls return when RF stops.':'Stop transmission before changing amplifier state.';
  else if(mode==='Cooling down')reason='Wait for the amplifier countdown to finish.';
  else if(mode==='Warming up'){reason='Warming up: only Power off is available, to cancel the warm-up.';offWhileWarming=true}
  else if(c.cooldown_remaining>0)reason='Waiting briefly before another command.';

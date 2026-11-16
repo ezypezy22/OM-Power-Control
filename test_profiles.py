@@ -98,3 +98,8 @@ class TuneMinimumTests(unittest.TestCase):
   self.assertEqual(table,{'15 m':4,'17 m':6,'10 m':7,'20 m':8,'40 m':8,'12 m':11})
   for band in ('160 m','80 m','30 m','60 m','6 m'):self.assertNotIn(band,table)
   self.assertIsNone(profiles.profile('OM-3501A').get('tune_min_input_w'))
+
+class StopSequenceTests(unittest.TestCase):
+ def test_4001a_stop_sends_only_stop_until_the_vendor_sequence_is_known(self):
+  import profiles
+  self.assertIs(profiles.profile('OM-4001A')['stop_exits_tuning'],False)

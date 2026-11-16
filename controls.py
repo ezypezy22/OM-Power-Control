@@ -1,5 +1,5 @@
 """Single outstanding, non-retrying commands owned by the socket worker."""
-import time
+import re,time
 COMMANDS={'toggle':(b'O',{'OPERATE','STBY'}),'on':(b'Y',{'PAON','WA'}),'off':(b'Z',{'PAOFF','COON','CO'}),'autotune':(b'L',{'AUTO'}),'autotune-exit':(b'*',{'AUTOESC','SAVE DEFAULT'}),'autotune-stop':(b'8',{'STOP','AUTO:AUTOTUNE ABORTED'}),'fan-temp':(b'3',{'BLOWER:TEMP'}),'fan-ptt':(b'4',{'BLOWER:PTT'}),'fan-always':(b'5',{'BLOWER:ALWAYS'})}
 FAN_ACTIONS=('fan-temp','fan-ptt','fan-always')   # auxiliary fan mode (OM-2501A/3501A/4001A; the OM-4001C has no such command)
 # Seconds to wait for confirmation. Stop and Exit move the tuning capacitors before the amplifier answers, so they get longer.
@@ -14,7 +14,7 @@ def tune_guard(action,state,stage=0):
   if state.get('status')!='Operate':return 'Select Operate before starting automatic tuning'
   if (stage==0 and phase in ACTIVE_TUNE) or (stage==1 and phase not in ('entered','waiting')):return 'Automatic tuning state changed; review the amplifier'
  elif action=='autotune-stop':
-  if phase!='tuning':return 'Stop is verified only during active automatic tuning'
+  if (stage==0 and phase!='tuning') or (stage==1 and phase not in ('aborted','tuning')):return 'Stop is verified only during active automatic tuning'
  elif action=='autotune-exit':
   if phase!='waiting' and not (phase=='aborted' and state.get('autotune_abort_origin') in ('rf_lost','stop')):return 'Exit is verified while waiting or after an RF-interrupted tune; check amplifier after Stop'
  elif phase in ACTIVE_TUNE:return 'Automatic tuning is active or unrecognized; exit the waiting state before other controls'
@@ -55,7 +55,7 @@ class Controls:
   if action!='autotune-stop' and now-self.last_sent<2:raise ValueError('Please wait before sending another command')
   self.seen.add(key)
   if len(self.seen)>1000:raise ValueError('Reconnect before sending additional commands')
-  self.pending={'id':key,'action':action,'password':password,'stored':bool(stored and password is not None),'unlock':0 if password is not None else None,'sent':None,'expected_mode':expected_mode,'exit_after_rf_abort':action=='autotune-exit' and state.get('autotune_phase')=='aborted','exit_abort_origin':state.get('autotune_abort_origin') if action=='autotune-exit' and state.get('autotune_phase')=='aborted' else None};self.message='Command queued'
+  self.pending={'id':key,'action':action,'password':password,'stored':bool(stored and password is not None),'unlock':0 if password is not None else None,'sent':None,'expected_mode':expected_mode,'exit_after_stop':action=='autotune-stop' and state.get('stop_exits_tuning') is True,'exit_after_rf_abort':action=='autotune-exit' and state.get('autotune_phase')=='aborted','exit_abort_origin':state.get('autotune_abort_origin') if action=='autotune-exit' and state.get('autotune_phase')=='aborted' else None};self.message='Command queued'
  def take(self,state):
   if not self.pending or self.pending['sent'] is not None:return None
   reason=None
@@ -82,13 +82,28 @@ class Controls:
    if self.pending['unlock']==0:self.message='Unlocking tuning: waiting for the amplifier to accept the password step';return b'P'
    secret=self.pending['password'];self.pending['password']=None;self.last_secret=True;self.message='Password sent once; waiting for the amplifier'
    return secret.encode('ascii')+b';'
+  if self.pending['action']=='autotune-stop' and self.pending.get('stage')==1:return b'*'   # leave tuning mode after the stop
   return b'&' if self.pending['action']=='autotune' and self.pending.get('stage')==1 else COMMANDS[self.pending['action']][0]
+ NOT_TUNING=re.compile(r'ST[0-9AF]\d{3}-.*')
+ @classmethod
+ def _confirms(cls,p,tokens):
+  """A reply that settles Stop or Exit. Leaving tuning mode, shown by a status whose tuning flag is '-', also counts:
+  the OM-4001A answers Exit with PTTOFF only (2026-11-16 trace), never AUTOESC or SAVE."""
+  leaving=p['action']=='autotune-exit' or (p['action']=='autotune-stop' and p.get('stage')==1)
+  if leaving and any(cls.NOT_TUNING.fullmatch(t) for t in tokens):return True
+  return any(t in cls._wanted(p) for t in tokens)
+ def wants_status(self):
+  """True while an exit from tuning mode awaits confirmation: the engine then asks for status ('?', allowed at any time)."""
+  now=time.monotonic();p=self.pending
+  if p and p['sent'] is not None and now-p['sent']>=1 and (p['action']=='autotune-exit' or (p['action']=='autotune-stop' and p.get('stage')==1)):return True
+  return bool(self.uncertain and self.late and now<self.late['until'] and (self.late['pending']['action']=='autotune-exit' or self.late['pending'].get('stage')==1))
  @staticmethod
  def _wanted(p):
+  if p['action']=='autotune-stop' and p.get('stage')==1:return {'AUTOESC','SAVE USER','SAVE DEFAULT'}
   if p['action']=='autotune-exit':return {'SAVE USER','SAVE DEFAULT'} if p.get('exit_abort_origin')=='stop' else {'SAVE DEFAULT'} if p.get('exit_after_rf_abort') else {'AUTOESC'}
   return COMMANDS[p['action']][1]
  def observe(self,tokens):
-  if not self.pending and self.uncertain and self.late and time.monotonic()<self.late['until'] and any(t in self._wanted(self.late['pending']) for t in tokens):
+  if not self.pending and self.uncertain and self.late and time.monotonic()<self.late['until'] and self._confirms(self.late['pending'],tokens):
    # The amplifier did confirm, only late (it was still moving the capacitors): the result is known after all.
    action=self.late['pending']['action'];self.late=None;self.uncertain=False
    self.message={'autotune-stop':'Auto-tune stop confirmed by amplifier (late); stop RF manually','autotune-exit':'Automatic tuning exit confirmed by amplifier (late)'}[action];return
@@ -112,8 +127,14 @@ class Controls:
    if any(t.startswith('AUTO') for t in tokens):
     self.pending=None;self.uncertain=True;self.message='Unexpected automatic-tuning response. Check amplifier; no retry was sent.'
    return
+  if action=='autotune-stop':
+   if self.pending.get('stage',0)==0 and any(t in COMMANDS['autotune-stop'][1] for t in tokens) and self.pending.get('exit_after_stop'):
+    self.pending.update(stage=1,sent=None);self.message='Auto-tune stopped by amplifier; leaving tuning mode';return
+   if self.pending.get('stage')==1:
+    if self._confirms(self.pending,tokens):self.pending=None;self.message='Auto-tune stopped and tuning mode exited; stop RF manually'
+    return
   wanted=self._wanted(self.pending)
-  if any(t in wanted or (t.startswith('WA') and 'WA' in wanted and t[2:].isdigit()) or (t.startswith('CO') and 'CO' in wanted and t[2:].isdigit()) for t in tokens):
+  if (action=='autotune-exit' and self._confirms(self.pending,tokens)) or any(t in wanted or (t.startswith('WA') and 'WA' in wanted and t[2:].isdigit()) or (t.startswith('CO') and 'CO' in wanted and t[2:].isdigit()) for t in tokens):
    action=self.pending['action']
    expected=self.pending.get('expected_mode')
    if action=='toggle' and expected:

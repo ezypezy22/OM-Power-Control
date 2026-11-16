@@ -217,7 +217,7 @@ class Monitor:
   model_pending: the INFO reply has not arrived yet and the identification wait has not passed."""
   now=time.monotonic();fault,_=active_fault(self.state,now)
   pending=self.identify_until is not None and not self.state.get('info') and now<self.identify_until
-  return {**self.state,'fault_active':fault is not None,'controls_verified':self.profile_now()['controls_verified'] is True,'basic_controls':self.profile_now().get('basic_controls') is True,'model_pending':pending}
+  return {**self.state,'fault_active':fault is not None,'controls_verified':self.profile_now()['controls_verified'] is True,'basic_controls':self.profile_now().get('basic_controls') is True,'stop_exits_tuning':self.profile_now().get('stop_exits_tuning') is True,'model_pending':pending}
  def disconnect(self):
   with self.lock:
    self.stop.set()
@@ -262,7 +262,7 @@ class Monitor:
     # The data timeout starts when session setup completes, not before TCP/setup.
     received=time.monotonic()
     sock.sendall(b'?');sock.sendall(b'1')   # 1: one INFO request (model, firmware, hours) per connection
-    fan_queried=False;next_poll=0;next_frequency=0;next_status=time.monotonic()+2
+    fan_queried=False;next_exit_status=0;next_poll=0;next_frequency=0;next_status=time.monotonic()+2
     with self.lock:self.state={'connection':'Waiting for amplifier data','_received':received};self.identify_until=received+IDENTIFY_SECONDS
     while not self.stop.is_set():
      now=time.monotonic()
@@ -294,6 +294,9 @@ class Monitor:
       next_status=now+2
      if now>=next_poll:
       sock.sendall(b'#');next_poll=now+1
+     with self.lock:asking=not command and self.controls.wants_status()
+     if asking and now>=next_exit_status and not dec.state.get('transmitting'):
+      sock.sendall(b'?');next_exit_status=now+1.5   # confirm the amplifier has left tuning mode
      if not fan_queried and not command and not (self.read_only or self.mode_test or self.power_test or self.readiness_test or self.tune_test) and dec.state.get('info') and not dec.state.get('transmitting'):
       # 2: one read of the auxiliary fan mode per connection, once INFO shows the model has that command.
       fan_queried=True

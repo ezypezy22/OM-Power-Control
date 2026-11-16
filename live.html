@@ -340,7 +340,7 @@ function renderAutotuneDialog(s,p){const d=$('autotuneDialog');if(!d)return;if(p
  /* A finished or failed tune: say so plainly and tell the operator to stop RF until the amplifier reports it is off. */
  /* The amplifier states the minimum itself when the drive is too low; that beats the measured table. */
  const need=p.gauges.minInputW??(atBand?s.model_profile?.tune_min_input_w?.[atBand]:null),fmtW=v=>Number.isInteger(v)?String(v):v.toFixed(1);
- const result={succeeded:['SUCCESSFUL AUTOTUNE','success'],aborted:['AUTO-TUNE ABORTED','fail'],unknown:['RESULT UNKNOWN','fail']}[p.phase],box=$('atResult');box.hidden=!result;if(!result)tuneAlarm(0);
+ const result={succeeded:['SUCCESSFUL AUTOTUNE','success'],aborted:['AUTO-TUNE ABORTED','fail'],unknown:['RESULT UNKNOWN','fail']}[p.phase]||(p.phase==='cancelled'&&s.transmitting!==false?['AUTO-TUNE STOPPED','fail']:null),box=$('atResult');box.hidden=!result;if(!result)tuneAlarm(0);
  if(result){const stop=s.transmitting!==false,low=!!need&&result[1]==='fail'&&atPeak!==null&&atPeak<need;box.dataset.kind=result[1];box.dataset.stop=String(stop);$('atResultTitle').textContent=low?'INCREASE INPUT TO '+fmtW(need)+' W':result[0];tuneAlarm(stop?(result[1]==='success'?880:520):0);$('atResultAction').textContent=stop?'STOP TRANSMITTING NOW':result[1]==='success'?'RF is off. You can exit auto-tune.':low?'RF is off. Raise drive to at least '+need+' W and try again.':'RF is off. Check the amplifier.';
  $('atDetail').textContent=low?'Highest input was '+atPeak+' W; this band typically needs about '+need+' W for auto-tune to start.':p.detail;
  if(p.phase==='unknown'&&s.autotune_message)$('atDetail').textContent+=' Amplifier said: "'+String(s.autotune_message).slice(0,80)+'"'}

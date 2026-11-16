@@ -78,6 +78,13 @@ class Decoder:
                 if re.fullmatch(r'ST[0-9AF][01][01]1[01-]\s*.*',token):
                     self.mark('rf');self._saved_tune_release=False;self._last_plate_current=None
                     self.state.update(transmitting=True,rf_idle_confirmed=False,rf_idle_source=None)
+                # STxabcd: d is 1 manual tuning, 0 automatic tuning, - not tuning (vendor rev.4). A status with '-' while the
+                # app still shows a tune means the amplifier has left tuning mode (the OM-4001A exits silently on *).
+                tune_flag=re.fullmatch(r'ST[0-9AF]\d{3}([-01]).*',token)
+                if tune_flag:
+                    self.state['tune_mode']={'-':None,'0':'auto','1':'manual'}[tune_flag.group(1)]
+                    if tune_flag.group(1)=='-' and self.state.get('autotune_phase') in ('waiting','tuning','unknown','aborted'):
+                        self.state.update(autotune_phase='cancelled',autotune_message='Amplifier left tuning mode',autotune_saved=False,autotune_low_input=False);self.mark('autotune')
                 status_match=re.fullmatch(r'ST([0-9AF]\d{3})-\s*(.*)',token)
                 if status_match:
                     code,name=status_match.groups()

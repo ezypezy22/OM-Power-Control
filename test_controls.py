@@ -113,3 +113,23 @@ class SlowStopTests(unittest.TestCase):
  def test_other_commands_keep_the_five_second_rule(self):
   c=Controls();s=self.state(status='Standby',autotune_phase=None);c.request('toggle','request-123',s);c.take(s)
   self.now[0]+=6;c.tick();self.assertTrue(c.uncertain);c.observe(['OPERATE']);self.assertTrue(c.uncertain)
+
+class StopExitsTuningTests(unittest.TestCase):
+ """OM-4001A: after STOP the amplifier stays in tuning mode and re-arms on the operator's RF, so Stop also sends *."""
+ def state(self,**kw):return {'connection':'Connected','_received':time.monotonic(),'status':'Operate','transmitting':True,'autotune_phase':'tuning','stop_exits_tuning':True,**kw}
+ def test_stop_then_exit_confirmed_by_the_tuning_flag(self):
+  c=Controls();s=self.state();c.request('autotune-stop','request-123',s);self.assertEqual(c.take(s),b'8')
+  c.observe(['STOP','AUTO:AUTOTUNE ABORTED']);self.assertIsNotNone(c.pending)
+  s=self.state(autotune_phase='aborted');self.assertEqual(c.take(s),b'*');self.assertIsNone(c.take(s))
+  c.pending['sent']-=1.2;self.assertTrue(c.wants_status())
+  c.observe(['PTTOFF']);self.assertIsNotNone(c.pending)   # PTTOFF alone does not prove the exit
+  c.observe(['ST0110- NO ANTENNA SWITCH']);self.assertIsNone(c.pending);self.assertFalse(c.uncertain);self.assertFalse(c.wants_status())
+ def test_status_still_in_tuning_mode_is_not_a_confirmation(self):
+  c=Controls();s=self.state();c.request('autotune-stop','request-123',s);c.take(s);c.observe(['STOP']);c.take(self.state(autotune_phase='aborted'))
+  c.observe(['ST01100 NO ANTENNA SWITCH']);self.assertIsNotNone(c.pending)
+ def test_other_models_keep_the_single_stop(self):
+  c=Controls();s=self.state(stop_exits_tuning=False);c.request('autotune-stop','request-123',s);self.assertEqual(c.take(s),b'8')
+  c.observe(['STOP']);self.assertIsNone(c.pending);self.assertIsNone(c.take(s))
+ def test_manual_exit_confirmed_by_the_tuning_flag(self):
+  c=Controls();s=self.state(autotune_phase='aborted',autotune_abort_origin='stop',transmitting=False);c.request('autotune-exit','request-123',s);self.assertEqual(c.take(s),b'*')
+  c.observe(['PTTOFF']);self.assertIsNotNone(c.pending);c.observe(['ST0110- NO ANTENNA SWITCH']);self.assertIsNone(c.pending);self.assertFalse(c.uncertain)
