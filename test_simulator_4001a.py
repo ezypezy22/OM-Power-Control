@@ -122,3 +122,78 @@ class ModelOptionTests(unittest.TestCase):
   self.assertLess(html.index('.connectRow[hidden]{display:none}'),html.index('.connectRow{display:flex'))
   self.assertIn('id="simExtras" hidden',html)
 if __name__=='__main__':unittest.main()
+
+class FanTests(unittest.TestCase):
+ def test_decoder_reads_the_fan_mode(self):
+  d=Decoder();d.feed(b'BLOWER:PTT;');self.assertEqual(d.state['fan_mode'],'ptt')
+  d.feed(b'BLOWER:ALWAYS;');self.assertEqual(d.state['fan_mode'],'always')
+ def test_simulators_report_and_change_the_fan_mode(self):
+  for sim in (Simulated4001A(),SimulatedAmplifier()):
+   sim.sendall(b'2');self.assertEqual(drain(sim),b'BLOWER:TEMP;')
+   sim.sendall(b'5');self.assertEqual(drain(sim),b'BLOWER:ALWAYS;')
+
+class UnlockSimTests(unittest.TestCase):
+ def test_tuning_needs_the_admin_password_on_the_4001a(self):
+  sim=Simulated4001A(start='Operate');sim.sendall(b'L');self.assertEqual(drain(sim),b'BADPSW;')
+  sim.sendall(b'P');self.assertEqual(drain(sim),b'\x06');sim.sendall(b'wrong;');self.assertEqual(drain(sim),b'PSWFAIL;')
+  sim.sendall(b'P');drain(sim);sim.sendall(b'0000000000;');self.assertEqual(drain(sim),b'POK;')
+  sim.sendall(b'L');self.assertEqual(drain(sim),b'AUTO;')
+ def test_decoder_keeps_ack_bytes_apart_from_the_next_reply(self):
+  d=Decoder();d.feed(b'\x06POK;');self.assertEqual(d.tokens,['ACK','POK'])
+
+class TunePositionTests(unittest.TestCase):
+ def test_positions_are_reported_while_tuning_and_decode_to_percent(self):
+  for sim in (SimulatedAmplifier(),Simulated4001A(start='Operate')):
+   sim.phase='tuning';sim.rf=True;sim.started=time.monotonic()-3;sim.sendall(b'#');d=Decoder();d.feed(drain(sim))
+   self.assertTrue(10<d.state['tune_pct']<=20.1,d.state);self.assertTrue(30<d.state['load_pct']<=62.5,d.state)
+
+class OffsetTests(unittest.TestCase):
+ def test_offset_value_follows_the_vendor_scale(self):
+  d=Decoder();d.feed(b'OT10;OT100;');self.assertEqual(d.state['autotune_offset_raw'],100)
+  sim=SimulatedAmplifier();sim.phase='tuning';sim.rf=True;sim.started=time.monotonic()-3;sim.sendall(b'#');d=Decoder();d.feed(drain(sim))
+  self.assertTrue(40<=d.state['autotune_offset_raw']<=100)
+
+class LowInputPromptTests(unittest.TestCase):
+ def test_increase_input_prompt_keeps_the_tune_waiting_and_reports_the_minimum(self):
+  d=Decoder();d.feed(b'AUTO;AUTO:WAITING FOR INPUT POWER;')
+  d.feed(b'AUTO:INCREASE INPUT POWER ABOVE 8.0W!;')
+  self.assertEqual(d.state['autotune_phase'],'waiting');self.assertTrue(d.state['autotune_low_input']);self.assertEqual(d.state['autotune_min_input_w'],8.0)
+  d.feed(b'AUTO:AUTOTUNE IN PROGRESS;');self.assertEqual(d.state['autotune_phase'],'tuning');self.assertFalse(d.state['autotune_low_input'])
+ def test_prompt_is_accepted_as_the_reply_to_preparing_the_tune(self):
+  from controls import Controls
+  s={'connection':'Connected','_received':time.monotonic(),'status':'Operate','transmitting':False}
+  c=Controls();c.request('autotune','request-123',s);c.take(s);c.observe(['AUTO']);s['autotune_phase']='entered';self.assertEqual(c.take(s),b'&')
+  c.observe(['AUTO:INCREASE INPUT POWER ABOVE 8.0W!']);self.assertIsNone(c.pending);self.assertFalse(c.uncertain)
+
+class TuningFlagTests(unittest.TestCase):
+ def test_leaving_tuning_mode_ends_the_tune_in_the_decoder(self):
+  d=Decoder();d.feed(b'AUTO;AUTO:WAITING FOR INPUT POWER;AUTO:AUTOTUNE IN PROGRESS;STOP;AUTO:AUTOTUNE ABORTED;')
+  d.feed(b'ST01100 NO ANTENNA SWITCH;');self.assertEqual(d.state['autotune_phase'],'aborted');self.assertEqual(d.state['tune_mode'],'auto')
+  d.feed(b'ST0110- NO ANTENNA SWITCH;');self.assertEqual(d.state['autotune_phase'],'cancelled');self.assertIsNone(d.state['tune_mode']);self.assertEqual(d.state['status'],'Operate')
+ def test_4001a_simulator_exits_silently_like_the_real_amplifier(self):
+  sim=Simulated4001A(start='Operate');sim.phase='aborted';sim.sendall(b'?');self.assertTrue(drain(sim).startswith(b'ST01100'))
+  sim.sendall(b'*');self.assertEqual(drain(sim),b'PTTOFF;');sim.sendall(b'?');self.assertTrue(drain(sim).startswith(b'ST0110-'))
+
+class StopEndToEndTests(unittest.TestCase):
+ def test_stop_during_a_tune_leaves_tuning_mode_without_locking_controls(self):
+  import admin_password,profiles,simulator
+  with patch.dict(profiles.PROFILES['OM4001A'],{'controls_verified':True,'stop_exits_tuning':True}),patch.object(simulator,'simulator_for',lambda m:Simulated4001A(start='Operate')):
+   admin_password.forget();m=Monitor(simulate=True);m.settings['model']='OM-4001A';m.settings['host']='simulation';m.connect()
+   try:
+    def wait(cond,limit=8):
+     end=time.monotonic()+limit
+     while time.monotonic()<end:
+      s=m.snapshot()
+      if cond(s):return s
+      time.sleep(.05)
+     self.fail('timed out: '+str({k:s.get(k) for k in ('status','autotune_phase','control')}))
+    wait(lambda s:s.get('connection')=='Connected' and s.get('info') and s.get('status')=='Operate')
+    m.command('autotune','request-tune-1',password='0000000000');wait(lambda s:s.get('autotune_phase')=='waiting' and not s['control']['pending'])
+    m.simulator.set_input(True);wait(lambda s:s.get('autotune_phase')=='tuning')
+    m.command('autotune-stop','request-stop-1');wait(lambda s:s['control']['pending_action']=='autotune-stop' and m.simulator.phase is None)
+    m.simulator.set_input(False)   # the operator releases RF; the engine then asks for status
+    s=wait(lambda s:not s['control']['pending'])
+    self.assertEqual(s.get('autotune_phase'),'cancelled');self.assertFalse(s['control']['uncertain'])
+    after=m.simulator.sent[m.simulator.sent.index(b'8'):]
+    self.assertEqual([x for x in after if x in (b'8',b'*')],[b'8',b'*']);self.assertIn(b'?',after)
+   finally:m.disconnect();m.thread and m.thread.join(3)

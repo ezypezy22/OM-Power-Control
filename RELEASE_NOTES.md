@@ -1,3 +1,9 @@
+0.1.35 prerelease 2 — build 41
+
+Integrates PR #11 at c9eeec7 with 0.1.35 prerelease 1 and the reviewed password/settings/countdown fixes. Preserves prominent SWR. Enables OM4001A Auto Tune based on operator report, with admin password accepted before remembering. Adds themes, fan controls, tuning dialog and OM2501A monitoring. Compact callsign wrapping fixed; LIVE edge glow and Operate pulse removed; LIVE LED pulse retained; About amplifier dismisses on outside click. Separate preview settings; no automatic equipment connection on first use.
+
+Local unpublished build 38: prerelease 1 plus PR #11, preserving prominent SWR and release fixes. OM4001A Auto Tune enabled per operator report; experimental opt-in removed. Retained countdown protection; fixed premature password persistence; retained shared meter preference. Private test identity/settings.
+
 Build 37: Prominent SWR beside forward power, green through brownish to red as SWR rises; idle/stale/unavailable readings show a neutral dash. Display colors are not amplifier protection thresholds.
 
 OM Power Control 0.1.35-om4001a.1 — experimental prerelease

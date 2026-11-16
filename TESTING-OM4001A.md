@@ -1,13 +1,11 @@
-# OM4001A experimental hardware test
+# OM Power Control 0.1.35 prerelease 2 (build 41)
 
-Use this prerelease only for deliberate operator-supervised testing under the amplifier manufacturer’s instructions and station limits. Quit other OM Power app copies first. The app shares your existing settings. Apple Silicon and macOS 14 or newer are required.
+Apple Silicon. This preview uses separate station settings from the normal release. Settings from the local PR11 test builds are reused. Enter the amplifier address manually when first using the preview; Auto Discovery is currently available in KPA1500 Control, not OM Power Control.
 
-1. With RF off, select the amplifier address and model, connect, and confirm About amplifier reports OM4001A and the actual firmware (3.16 or newer). Check the upper-left heading reads OM4001A Control and readings match the amplifier.
-2. In Settings, enable experimental OM4001A testing and confirm the warning. Permission applies only to this connection. Verify basic Operate/Standby and normal power/cooling behavior first. The app blocks commands during warm-up and cooling.
-3. Proceed to Auto Tune only when basic controls and telemetry are confirmed and the station is configured under the manufacturer’s instructions. Select Operate and Start Auto Tune. Wait for the amplifier’s confirmed waiting state before manually supplying the prescribed RF/drive. The app does not key or adjust the radio.
-4. Observe tuning and confirmed completion. Stop RF manually as required by the manufacturer. Check the amplifier’s own display and settings; an app message alone is not hardware validation. Test waiting-state Exit and active-tuning Stop only within the manufacturer’s permitted procedure. Unexpected replies or unconfirmed commands require operator review; do not repeatedly click or retry.
-5. Reconnect and confirm experimental controls have returned to disabled. Verify saving unrelated settings does not change the DX Caliber shared measurement.
+Close other amplifier clients before connecting. Choose the correct model and confirm the reported amplifier model/firmware and readings. OM4001A operating controls and Auto Tune are enabled based on operator-reported hardware testing. The experimental session opt-in has been removed. OM2501A remains monitoring only.
 
-Report amplifier model, firmware, macOS version, prerelease version, which steps were completed, expected versus observed results, and relevant timestamped protocol responses. Do not post station credentials, private network details or unrelated captures publicly. No intentionally induced faults, RF transmission into an unsuitable load, or protection bypass is required.
+For OM4001A, click Auto-tune and confirm; an Unlock tuning dialog requests the amplifier admin password unless one is already saved. OM3501A does not require this password. Remember saves only after the amplifier accepts it; a wrong typed password does not erase a good saved one. Storage is a private file, not encrypted. Settings provides Forget saved admin password. Passwords are excluded from snapshots and redacted in traces.
 
-Simulation tests validate the app’s state handling only; they do not certify OM4001A hardware behavior.
+The operator supplies and stops RF and sets drive under manufacturer instructions. This app never keys the radio or adjusts drive. Stop sends one request; stop RF manually. Exit waits for RF-off and amplifier confirmation. Do not infer successful tuning from a stopped or interrupted tune. Fault, freshness, countdown, command-confirmation and no-retry protections remain.
+
+Check prominent SWR, full/compact layout, callsign wrapping, steady LIVE/Operate borders, pulsing LIVE LED, themes, and About amplifier click-outside dismissal. Fan-setting commands and abnormal hardware paths need further operator validation. Portable/simulation tests are not hardware certification.

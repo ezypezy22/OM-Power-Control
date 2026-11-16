@@ -15,12 +15,10 @@ class Tests(unittest.TestCase):
   for change in [{'transmitting':True},{'status':'Warming up'},{'status':'Cooling down'},{'connection':'Disconnected'},{'_received':time.monotonic()-5}]:
    c=Controls()
    with self.assertRaises(ValueError):c.request('toggle','request-123',self.state(**change))
- def test_countdowns_block_every_basic_action_and_recheck_before_send(self):
-  for status in ('Warming up','Cooling down'):
+ def test_countdowns_preserve_all_operating_guards(self):
+  for mode in ('Warming up','Cooling down'):
    for action in ('toggle','on','off'):
-    with self.assertRaises(ValueError):Controls().request(action,'countdown-'+action,self.state(status=status))
-   c=Controls();c.request('off','queued-before-countdown',self.state(status='Standby'))
-   self.assertIsNone(c.take(self.state(status=status)));self.assertIsNone(c.pending)
+    with self.assertRaises(ValueError):Controls().request(action,'request-123',self.state(status=mode))
  def test_transmit_after_queue(self):
   c=Controls();c.request('toggle','request-123',self.state());self.assertIsNone(c.take(self.state(transmitting=True)));self.assertIsNone(c.pending)
  def test_loss_never_requeues(self):
@@ -43,3 +41,90 @@ class Tests(unittest.TestCase):
   for action,status in [('on','Operate'),('on','Standby'),('on','On'),('off','Off')]:
    with self.assertRaises(ValueError):Controls().request(action,'request-123',self.state(status=status))
 if __name__=='__main__':unittest.main()
+
+class FanTests(unittest.TestCase):
+ def state(self,**kw):return {'connection':'Connected','_received':time.monotonic(),'status':'Standby','transmitting':False,**kw}
+ def test_fan_commands_send_the_documented_bytes_and_confirm_on_the_reply(self):
+  for action,wire,token in [('fan-temp',b'3','BLOWER:TEMP'),('fan-ptt',b'4','BLOWER:PTT'),('fan-always',b'5','BLOWER:ALWAYS')]:
+   c=Controls();s=self.state();c.request(action,'request-123',s);self.assertEqual(c.take(s),wire)
+   c.observe(['BLOWER:'+('TEMP' if token!='BLOWER:TEMP' else 'PTT')]);self.assertIsNotNone(c.pending)   # a different mode is not a confirmation
+   c.observe([token]);self.assertIsNone(c.pending);self.assertFalse(c.uncertain)
+ def test_fan_is_blocked_while_transmitting_or_counting_down_and_never_with_an_expected_mode(self):
+  for change in ({'transmitting':True},{'status':'Cooling down'},{'status':'Warming up'}):
+   with self.assertRaises(ValueError):Controls().request('fan-ptt','request-123',self.state(**change))
+  with self.assertRaises(ValueError):Controls().request('fan-ptt','request-123',self.state(),'Standby')
+ def test_fan_follows_the_basic_controls_gate(self):
+  with self.assertRaises(ValueError):Controls().request('fan-ptt','request-123',self.state(controls_verified=False))
+  Controls().request('fan-ptt','request-123',self.state(controls_verified=False,basic_controls=True))
+
+class RefusalTests(unittest.TestCase):
+ def test_a_password_refusal_is_reported_not_left_uncertain(self):
+  s={'connection':'Connected','_received':time.monotonic(),'status':'Operate','transmitting':False}
+  c=Controls();c.request('autotune','request-123',s);self.assertEqual(c.take(s),b'L')
+  c.observe(['TE60','BADPSW']);self.assertIsNone(c.pending);self.assertFalse(c.uncertain);self.assertIn('refused',c.message)
+
+class UnlockTests(unittest.TestCase):
+ def state(self):return {'connection':'Connected','_received':time.monotonic(),'status':'Operate','transmitting':False}
+ def test_unlock_then_tune_sends_p_password_then_l_once_each(self):
+  s=self.state();c=Controls();c.request('autotune','request-123',s,password='secret')
+  self.assertEqual(c.take(s),b'P');self.assertFalse(c.last_secret);self.assertIsNone(c.take(s))
+  c.observe(['ACK']);self.assertEqual(c.take(s),b'secret;');self.assertTrue(c.last_secret);self.assertIsNone(c.pending['password'])
+  c.observe(['POK']);self.assertEqual(c.take(s),b'L');self.assertFalse(c.last_secret)
+  c.observe(['AUTO']);s['autotune_phase']='entered';self.assertEqual(c.take(s),b'&')
+ def test_rejected_or_unready_unlock_stops_without_retry_or_uncertainty(self):
+  for first,second,text in (('NAK',None,'not ready'),('ACK','PSWFAIL','rejected')):
+   s=self.state();c=Controls();c.request('autotune','request-123',s,password='bad');c.take(s);c.observe([first])
+   if second:c.take(s);c.observe([second])
+   self.assertIsNone(c.pending);self.assertFalse(c.uncertain);self.assertIn(text,c.message);self.assertIsNone(c.take(s))
+ def test_password_is_validated_and_only_for_autotune(self):
+  for bad in ('','x'*11,'a;b','sp ace','é'):
+   with self.assertRaises(ValueError):Controls().request('autotune','request-123',self.state(),password=bad)
+  with self.assertRaises(ValueError):Controls().request('toggle','request-123',self.state(),password='abc')
+
+class RejectionCountTests(unittest.TestCase):
+ def test_a_rejected_password_is_counted_for_the_page(self):
+  s={'connection':'Connected','_received':time.monotonic(),'status':'Operate','transmitting':False}
+  c=Controls();self.assertEqual(c.view()['password_rejections'],0)
+  c.request('autotune','request-123',s,password='bad');c.take(s);c.observe(['ACK']);c.take(s);c.observe(['PSWFAIL'])
+  self.assertEqual(c.view()['password_rejections'],1)
+
+class SlowStopTests(unittest.TestCase):
+ """The amplifier moves its capacitors before answering Stop; a slow but genuine STOP must not lock the controls."""
+ def setUp(self):self.now=[1000.0];self.p=patch('controls.time.monotonic',lambda:self.now[0]);self.p.start()
+ def tearDown(self):self.p.stop()
+ def state(self,**kw):return {'connection':'Connected','_received':self.now[0],'status':'Operate','transmitting':False,'autotune_phase':'tuning',**kw}
+ def test_stop_confirmed_after_seven_seconds_is_not_uncertain(self):
+  c=Controls();s=self.state();c.request('autotune-stop','request-123',s);self.assertEqual(c.take(s),b'8')
+  self.now[0]+=7;c.tick();self.assertIsNotNone(c.pending);self.assertFalse(c.uncertain)
+  c.observe(['STOP','AUTO:AUTOTUNE ABORTED']);self.assertIsNone(c.pending);self.assertFalse(c.uncertain)
+ def test_a_very_late_stop_still_clears_the_lock(self):
+  c=Controls();s=self.state();c.request('autotune-stop','request-123',s);c.take(s)
+  self.now[0]+=16;c.tick();self.assertTrue(c.uncertain)
+  self.now[0]+=3;c.observe(['STOP']);self.assertFalse(c.uncertain);self.assertIn('late',c.message)
+ def test_late_window_expires_and_unrelated_replies_do_not_clear_it(self):
+  c=Controls();s=self.state();c.request('autotune-stop','request-123',s);c.take(s)
+  self.now[0]+=16;c.tick();c.observe(['TE60','AUTOESC']);self.assertTrue(c.uncertain)
+  self.now[0]+=31;c.observe(['STOP']);self.assertTrue(c.uncertain)
+ def test_other_commands_keep_the_five_second_rule(self):
+  c=Controls();s=self.state(status='Standby',autotune_phase=None);c.request('toggle','request-123',s);c.take(s)
+  self.now[0]+=6;c.tick();self.assertTrue(c.uncertain);c.observe(['OPERATE']);self.assertTrue(c.uncertain)
+
+class StopExitsTuningTests(unittest.TestCase):
+ """OM-4001A: after STOP the amplifier stays in tuning mode and re-arms on the operator's RF, so Stop also sends *."""
+ def state(self,**kw):return {'connection':'Connected','_received':time.monotonic(),'status':'Operate','transmitting':True,'autotune_phase':'tuning','stop_exits_tuning':True,**kw}
+ def test_stop_then_exit_confirmed_by_the_tuning_flag(self):
+  c=Controls();s=self.state();c.request('autotune-stop','request-123',s);self.assertEqual(c.take(s),b'8')
+  c.observe(['STOP','AUTO:AUTOTUNE ABORTED']);self.assertIsNotNone(c.pending)
+  s=self.state(autotune_phase='aborted');self.assertEqual(c.take(s),b'*');self.assertIsNone(c.take(s))
+  c.pending['sent']-=1.2;self.assertTrue(c.wants_status())
+  c.observe(['PTTOFF']);self.assertIsNotNone(c.pending)   # PTTOFF alone does not prove the exit
+  c.observe(['ST0110- NO ANTENNA SWITCH']);self.assertIsNone(c.pending);self.assertFalse(c.uncertain);self.assertFalse(c.wants_status())
+ def test_status_still_in_tuning_mode_is_not_a_confirmation(self):
+  c=Controls();s=self.state();c.request('autotune-stop','request-123',s);c.take(s);c.observe(['STOP']);c.take(self.state(autotune_phase='aborted'))
+  c.observe(['ST01100 NO ANTENNA SWITCH']);self.assertIsNotNone(c.pending)
+ def test_other_models_keep_the_single_stop(self):
+  c=Controls();s=self.state(stop_exits_tuning=False);c.request('autotune-stop','request-123',s);self.assertEqual(c.take(s),b'8')
+  c.observe(['STOP']);self.assertIsNone(c.pending);self.assertIsNone(c.take(s))
+ def test_manual_exit_confirmed_by_the_tuning_flag(self):
+  c=Controls();s=self.state(autotune_phase='aborted',autotune_abort_origin='stop',transmitting=False);c.request('autotune-exit','request-123',s);self.assertEqual(c.take(s),b'*')
+  c.observe(['PTTOFF']);self.assertIsNotNone(c.pending);c.observe(['ST0110- NO ANTENNA SWITCH']);self.assertIsNone(c.pending);self.assertFalse(c.uncertain)

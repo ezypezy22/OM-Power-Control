@@ -18,7 +18,7 @@ function amplifierPresentation(s) {
  }
  if(s.rf_state_unknown)return {kind:'stale',title:'RF state unconfirmed',detail:mode+' · last RF reading is stale; controls paused'};
  if(s.transmitting===true)return {kind:'transmitting',title:'Transmitting',detail:mode==='Operate'?'Operate · RF active':'RF active · mode awaiting confirmation'};
- if(mode==='Operate')return {kind:'operate',title:'Operate',detail:'Amplifier enabled · no transmit indication'};
+ if(mode==='Operate')return {kind:'operate',title:'Operate',detail:''};
  if(mode==='Standby')return {kind:'standby',title:'Standby',detail:'Amplifier in standby'};
  if(mode==='Off')return {kind:'off',title:'Amplifier off',detail:'Network listener connected'};
  return {kind:'waiting',title:'Awaiting mode confirmation',detail:mode==='On'?'Powered on · waiting for operating mode':'Connected · operating mode not yet reported'};
@@ -54,9 +54,14 @@ function basicControls(s,whenUnknown){
 }
 if(typeof module!=='undefined'){module.exports.controlsVerified=controlsVerified;module.exports.basicControls=basicControls;}
 
+/* Auxiliary fan: the amplifier reports temp, ptt or always (BLOWER:x). Unknown until it has answered. */
+const FAN_NAMES={temp:'Temperature',ptt:'PTT',always:'Always on'};
+function fanLabel(s){return 'Fan: '+(FAN_NAMES[s.fan_mode]||'—')}
+if(typeof module!=='undefined')module.exports.fanLabel=fanLabel;
+
 function amplifierControls(s,localPending=false){
  const mode=s.status||'Unknown',c=s.control||{};
- let reason='';
+ let reason='',offWhileWarming=false;
  if(s.readiness_test)reason='Restricted no-RF readiness test: commands are managed by the test; keep the radio idle.';
  else if(s.power_test)reason='Restricted power-cycle test: commands are managed by the test; Operate and tuning are blocked.';
  else if(s.mode_test)reason='Restricted Operate/Standby test: commands are managed by the test; power and tuning are blocked.';
@@ -69,7 +74,7 @@ function amplifierControls(s,localPending=false){
  else if(localPending||c.pending)reason='Waiting for amplifier confirmation…';
  else if(['entered','waiting','tuning','unknown','aborted'].includes(s.autotune_phase))reason='Automatic tuning active; use its controls below.';
  else if(s.rf_state_unknown)reason='RF state is unconfirmed. Keep RF off and check the amplifier; controls remain paused.';
- else if(s.transmitting)reason='Stop transmission before changing amplifier state.';
+ else if(s.transmitting)reason=Number.isFinite(s.input)&&s.input>0?'Unkey your radio first: the amplifier still sees '+Math.round(s.input)+' W input. Standby and power controls return when RF stops.':'Stop transmission before changing amplifier state.';
  else if(mode==='Cooling down')reason='Wait for the amplifier countdown to finish.';
  else if(mode==='Warming up')reason='Wait for the amplifier countdown to finish.';
  else if(c.cooldown_remaining>0)reason='Waiting briefly before another command.';
@@ -77,7 +82,8 @@ function amplifierControls(s,localPending=false){
  return {reason,
   toggle:{label:mode==='Operate'?'Go to Standby':mode==='Standby'?'Go to Operate':'Toggle Operate / Standby',disabled:disabled||mode==='Off'||!!(s.tune_test&&s.tune_test_counts?.O>=2),expectedMode:['Operate','Standby'].includes(mode)?mode:null},
   on:{label:'Power on',disabled:disabled||!!s.tune_test||['On','Operate','Standby'].includes(mode)},
-  off:{label:'Power off',disabled:disabled||!!s.tune_test||mode==='Off'}
+  off:{label:'Power off',disabled:(disabled&&!offWhileWarming)||!!s.tune_test||mode==='Off'},
+  fan:{label:fanLabel(s),mode:s.fan_mode||null,supported:s.model_profile?.fan_control===true,disabled:disabled||!!s.tune_test||s.model_profile?.fan_control!==true||!s.fan_mode}
  };
 }
 if(typeof module!=='undefined')module.exports.amplifierControls=amplifierControls;
@@ -115,13 +121,22 @@ function forwardPowerMarks(s){
 function forwardPowerTicks(fullScale){return [0,1,2,3,4,5].map(i=>(fullScale*i/5).toLocaleString('en-US',{maximumFractionDigits:0})+(i===5?' W':''))}
 if(typeof module!=='undefined'){module.exports.forwardPowerClip=forwardPowerClip;module.exports.forwardPowerScale=forwardPowerScale;module.exports.forwardPowerTicks=forwardPowerTicks;module.exports.forwardPowerMarks=forwardPowerMarks;}
 
+// Theme colours for the meters (set by the page from the active theme; the dark defaults apply until then).
+let themePalette=null;
+function setThemePalette(p){themePalette=p}
+function paletteRgb(key,fallback){
+ const hex=String(themePalette?.[key]||'').match(/^#([0-9a-f]{6})/i);
+ return hex?[0,2,4].map(i=>parseInt(hex[1].slice(i,i+2),16)):fallback;
+}
+if(typeof module!=='undefined')module.exports.setThemePalette=setThemePalette;
+
 // Both readings describe the same mismatch. Color only fresh, active RF data.
 function mismatchColor(s){
- const neutral='#a5b2b6';
+ const neutral=themePalette?.neutral||'#a5b2b6';
  if(s.connection!=='Connected'||s.age_seconds>freshSeconds(s)||s.transmitting!==true||
     !Number.isFinite(s.forward)||s.forward<=0||!Number.isFinite(s.reflected)||s.reflected<0||
     !Number.isFinite(s.swr)||s.swr<1)return neutral;
- const stops=[[1,[121,213,179]],[1.5,[241,187,103]],[2,[229,103,88]]];
+ const stops=[[1,paletteRgb('ok',[121,213,179])],[1.5,paletteRgb('warn',[241,187,103])],[2,paletteRgb('bad',[229,103,88])]];
  const value=Math.min(2,s.swr),i=value<=1.5?0:1;
  const [low,a]=stops[i],[high,b]=stops[i+1],t=(value-low)/(high-low);
  return 'rgb('+a.map((v,j)=>Math.round(v+(b[j]-v)*t)).join(', ')+')';
@@ -160,15 +175,26 @@ function secondaryMeter(s,key='reflected'){
  const list={reflected:s.model_profile?.reflected_ticks_w,input:s.model_profile?.input_ticks_w}[key],custom=Array.isArray(list)&&list.length>1;
  const ticks=custom?list:[0,p.max/2,p.max];
  const tickMarks=ticks.map((v,i)=>({position:100*v/p.max,label:v.toLocaleString('en-US',{maximumFractionDigits:2})+(!custom&&i===ticks.length-1?' '+p.unit:'')}));
- return {...p,key,value,position,ticks,tickMarks,color:key==='reflected'?mismatchColor(s):value===null?'#a5b2b6':'#79d5b3'};
+ return {...p,key,value,position,ticks,tickMarks,color:key==='reflected'?mismatchColor(s):value===null?(themePalette?.neutral||'#a5b2b6'):(themePalette?.ok||'#79d5b3')};
 }
 if(typeof module!=='undefined'){module.exports.secondaryMeter=secondaryMeter;module.exports.SECONDARY_PROFILES=SECONDARY_PROFILES;}
+
+/* Temperature colour: green below 40 °C (the amplifier finishes cooling and turns off below 40 °C, per the vendor
+   document), amber from 40 °C, red from 60 °C (operator's choice; the document gives no high-temperature figure). */
+function temperatureLevel(c){if(typeof c!=='number'||!Number.isFinite(c))return '';return c<40?'cool':c<60?'warm':'hot'}
+if(typeof module!=='undefined')module.exports.temperatureLevel=temperatureLevel;
+
+/* Amateur band for a frequency in kHz, or null (used to label the tuning popup). */
+const BANDS_KHZ=[['160 m',1800,2000],['80 m',3500,4000],['60 m',5250,5450],['40 m',7000,7300],['30 m',10100,10150],['20 m',14000,14350],['17 m',18068,18168],['15 m',21000,21450],['12 m',24890,24990],['10 m',28000,29700],['6 m',50000,54000]];
+function bandFor(khz){if(typeof khz!=='number'||!Number.isFinite(khz))return null;const b=BANDS_KHZ.find(x=>khz>=x[1]&&khz<=x[2]);return b?b[0]:null}
+if(typeof module!=='undefined')module.exports.bandFor=bandFor;
 
 function autotunePresentation(s,pending=false){
  const phase=s.autotune_phase||'idle',active=['entered','waiting','tuning','unknown','aborted'].includes(phase),link=s.connection==='Connected'&&!(s.age_seconds>freshSeconds(s));
  let reason='';if(s.readiness_test)reason='No-RF readiness test: commands are managed by the test; do not transmit.';else if(s.power_test)reason='Restricted power-cycle test: tuning commands are blocked.';else if(s.mode_test)reason='Restricted Operate/Standby test: tuning commands are blocked.';else if(s.read_only)reason='Read-only telemetry: operating and tuning commands are blocked.';else if(!controlsVerified(s,false))reason='Auto-tune is verified only for OM-3501A.';else if(s.fault)reason='Amplifier fault active: commands are blocked. '+s.fault.text;else if(s.model_pending)reason='Waiting for the amplifier to report its model before enabling controls.';else if(!link)reason='Fresh amplifier communication is required.';else if(pending||s.control?.pending)reason='Waiting for command confirmation.';else if(s.control?.uncertain)reason='Command result uncertain; check amplifier. No retry was sent.';else if(s.rf_state_unknown)reason='RF state is unconfirmed; keep RF off and check the amplifier.';else if(s.transmitting)reason='Stop RF before using tuning controls.';else if(s.control?.cooldown_remaining>0)reason='Please wait before another command.';
  let title={idle:'Automatic tuning',entered:'Preparing auto-tune',waiting:'WAITING FOR INPUT POWER',tuning:'AUTO-TUNE IN PROGRESS',succeeded:'SUCCESSFUL AUTOTUNE!',cancelled:'Auto-tune exited',aborted:'AUTO-TUNE ABORTED',defaults:'Auto-tune exited · defaults restored','stopped-exited':'Stopped tune exited · settings saved',unknown:'Unexpected auto-tune response'}[phase]||'Unexpected auto-tune response';
  let detail={idle:'Operator sets tuning power and supplies the steady carrier.',entered:'Waiting for amplifier readiness.',waiting:'Set the prescribed tuning drive level, then transmit a steady carrier from your radio.',tuning:'Operator controls RF. Stop RF manually if tuning is abnormal.',succeeded:s.autotune_saved?'Amplifier reported settings saved automatically. Stop tuning RF.':'Amplifier reported tuning complete. Stop tuning RF.',cancelled:'Returned from automatic tuning without applying RF.',aborted:s.autotune_abort_origin==='rf_lost'?'RF was released before completion. Exit auto-tune to restore default settings; this was not a successful tune.':s.autotune_abort_origin==='stop'?'Tuning was stopped. Release RF, then use Exit; the amplifier may save its current settings. This is not a successful tune.':'Stop RF manually and check the amplifier. The abort cause is unrecognized.',defaults:'Amplifier reported default settings saved. No successful tune was saved.','stopped-exited':'Amplifier reported user settings saved after Stop. Successful tuning was not confirmed.',unknown:(s.autotune_message||'Unrecognized response')+' · Stop RF and check the amplifier; no retry is sent.'}[phase];
+ if(phase==='waiting'&&s.autotune_low_input===true&&Number.isFinite(s.autotune_min_input_w))detail='The amplifier needs more input power: raise the drive slowly to above '+(Number.isInteger(s.autotune_min_input_w)?s.autotune_min_input_w:s.autotune_min_input_w.toFixed(1))+' W. Auto-tune starts by itself once it is reached.';
  if(active&&!link){title='Auto-tune result unknown';detail='Communication interrupted. Stop RF manually and check the amplifier.';}
  else if(active&&s.autotune_age_seconds>15){title='Auto-tune status delayed';detail='No recent tuning status. Stop RF manually and check the amplifier; no retry is sent.';}
  if(s.readiness_test)detail='NO-RF TEST: do not transmit. Verify readiness, Exit, then return to Standby; no successful tune is expected.';
@@ -176,8 +202,11 @@ function autotunePresentation(s,pending=false){
  const stopBlocked=s.model_pending||s.read_only||s.mode_test||s.power_test||s.readiness_test||!controlsVerified(s,false)||!link||pending||s.control?.pending||s.control?.uncertain||phase!=='tuning';
  const pct=v=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(1)+' %':null;
  const parts=[['Load',pct(s.load_pct)],['Tune',pct(s.tune_pct)]].filter(x=>x[1]).map(x=>x.join(' '));
+ const fresh=link&&phase!=='idle'&&!(active&&s.autotune_age_seconds>15),num=v=>typeof v==='number'&&Number.isFinite(v)?v:null;
+ const gauges={tune:fresh?num(s.tune_pct):null,load:fresh?num(s.load_pct):null,offset:fresh?num(s.autotune_offset_raw):null,inputW:fresh?num(s.input):null,band:bandFor(s.frequency_khz),lowInput:fresh&&s.autotune_low_input===true,minInputW:fresh&&s.autotune_low_input===true?num(s.autotune_min_input_w):null};
+ gauges.offsetDb=gauges.offset!==null&&gauges.offset>=0&&gauges.offset<=200?(100-gauges.offset)/18:null;
  const positions=link&&phase!=='idle'&&!(active&&s.autotune_age_seconds>15)&&parts.length?'Capacitor positions · '+parts.join(' · '):'';
- return {positions,stopDisabled:!!stopBlocked||!!(s.tune_test&&s.tune_test_counts?.['8']),phase,title,detail,visible:phase!=='idle',startDisabled:!!reason||active||s.status!=='Operate'||!!(s.tune_test&&s.tune_test_counts?.L),exitDisabled:!!reason||!!(s.tune_test&&s.tune_test_counts?.['*'])||(phase!=='waiting'&&!(phase==='aborted'&&['rf_lost','stop'].includes(s.autotune_abort_origin))),reason};
+ return {positions,gauges,stopDisabled:!!stopBlocked||!!(s.tune_test&&s.tune_test_counts?.['8']),phase,title,detail,visible:phase!=='idle',startDisabled:!!reason||active||s.status!=='Operate'||!!(s.tune_test&&s.tune_test_counts?.L),exitDisabled:!!reason||!!(s.tune_test&&s.tune_test_counts?.['*'])||(phase!=='waiting'&&!(phase==='aborted'&&['rf_lost','stop'].includes(s.autotune_abort_origin))),reason};
 }
 if(typeof module!=='undefined')module.exports.autotunePresentation=autotunePresentation;
 

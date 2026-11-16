@@ -21,7 +21,10 @@ assert.equal(c({...live,status:'Standby'}).toggle.expectedMode,'Standby');
 assert.equal(c({...live,status:'Unknown'}).toggle.expectedMode,null);
 for(const status of ['Operate','Standby','On'])assert.equal(c({...live,status}).on.disabled,true);
 assert.equal(c({...live,status:'Off'}).off.disabled,true);
-for(const status of ['Warming up','Cooling down']){const w=c({...live,status});for(const key of ['toggle','on','off'])assert.equal(w[key].disabled,true);}
+// While warming up only Power off is available (it cancels the warm-up, as in the vendor client).
+{const w=c({...live,status:'Warming up'});assert.equal(w.toggle.disabled,true);assert.equal(w.on.disabled,true);assert.equal(w.off.disabled,true);assert.match(w.reason,/countdown/);}
+assert.equal(c({...live,status:'Warming up',transmitting:true}).off.disabled,true);
+assert.equal(c({...live,status:'Warming up',connection:'Stale'}).off.disabled,true);
 assert.equal(c({...live,status:'Off'}).on.disabled,false);
 assert.equal(c({...live,status:'Off'}).toggle.disabled,true);
 for(const extra of [{transmitting:true},{transmitting:null,rf_state_unknown:true},{connection:'Stale'},{age_seconds:4},{control:{pending:true}},{control:{uncertain:true}},{control:{cooldown_remaining:1}},{status:'Cooling down'}]){

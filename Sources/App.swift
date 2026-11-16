@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
     var compact = false
     func applicationDidFinishLaunching(_ notification: Notification) {
         // A second launch activates the first app and never opens the USB port.
-        let identifier = Bundle.main.bundleIdentifier ?? "com.grmi64.OM3501AControl"
+        let identifier = Bundle.main.bundleIdentifier ?? "com.grmi64.OMPowerControl.PR11Test"
         if let existing = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }) {
             existing.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
             NSApp.terminate(nil)
@@ -25,22 +25,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
         guard lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { NSApp.terminate(nil); return }
         configureMenus()
         window = NSWindow(contentRect: NSRect(x: 0,y: 0,width: 1000,height: 620), styleMask: [.titled,.closable,.miniaturizable,.resizable], backing: .buffered, defer: false)
-        window.title = "OM Power Control · OM4001A Experimental"
+        window.title = "OM Power Control · Prerelease 2"
         window.minSize = NSSize(width: 620,height: 560)
         window.center(); window.delegate = self
-        window.setFrameAutosaveName("OM3501AMainWindow")
+        window.setFrameAutosaveName("OMPR11TestMainWindow")
         ensureWindowVisible()
         NotificationCenter.default.addObserver(self, selector: #selector(recoverForScreenChange(_:)), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         let config = WKWebViewConfiguration()
         config.userContentController.add(self, name: "displayWindow")
+        config.userContentController.add(self, name: "theme")
         let savedCompact=UserDefaults.standard.bool(forKey:"OMCompact")
         let savedTop=UserDefaults.standard.bool(forKey:"OMOnTop")
-        config.userContentController.addUserScript(WKUserScript(source:"window.omPreferences={compact:\(savedCompact),alwaysOnTop:\(savedTop)};",injectionTime:.atDocumentStart,forMainFrameOnly:true))
+        let savedTheme=AppDelegate.themeBackgrounds[UserDefaults.standard.string(forKey:"OMTheme") ?? ""] != nil ? UserDefaults.standard.string(forKey:"OMTheme")! : "dark"
+        config.userContentController.addUserScript(WKUserScript(source:"window.omPreferences={compact:\(savedCompact),alwaysOnTop:\(savedTop),theme:\"\(savedTheme)\"};",injectionTime:.atDocumentStart,forMainFrameOnly:true))
         let webData = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent(identifier)
         try? FileManager.default.createDirectory(at: webData, withIntermediateDirectories: true)
         web = WKWebView(frame: window.contentView!.bounds, configuration: config)
         web.uiDelegate = self; web.navigationDelegate = self
         web.autoresizingMask = [.width,.height]; window.contentView!.addSubview(web)
+        applyTheme(savedTheme)
         window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         launchReader()
     }
@@ -75,7 +78,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
         // The shared backend defaults to simulation; preserve this host's real-device mode.
         let args = ["--hardware","--port","0"]
         task.arguments = args
-        task.environment = ProcessInfo.processInfo.environment.merging(["PYTHONDONTWRITEBYTECODE":"1","PYTHONUNBUFFERED":"1"]) { _,new in new }
+        let dataDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("OM Power Control PR11 Test", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+        let settingsURL = dataDirectory.appendingPathComponent("settings.json")
+        if !FileManager.default.fileExists(atPath: settingsURL.path) {
+            try? Data(#"{"model":"OM-4001A","host":"","port":10001,"auto_connect":false,"share_dxc":false}"#.utf8).write(to: settingsURL, options: .atomic)
+        }
+        task.environment = ProcessInfo.processInfo.environment.merging(["PYTHONDONTWRITEBYTECODE":"1","PYTHONUNBUFFERED":"1","OM_SETTINGS_PATH":settingsURL.path]) { _,new in new }
         let pipe = Pipe(); task.standardOutput = pipe
         task.standardError = FileHandle.standardError
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
@@ -98,13 +107,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
         do { try task.run(); process = task }
         catch { showError("Could not start amplifier service: \(error.localizedDescription)") }
     }
+    // Page background and appearance for each theme; the window chrome follows the page theme.
+    static let themeBackgrounds: [String:(light:Bool,r:CGFloat,g:CGFloat,b:CGFloat)] = [
+        "dark":(false,0x11/255,0x16/255,0x19/255), "cb":(false,0x11/255,0x16/255,0x19/255),
+        "hc-dark":(false,0,0,0), "light":(true,0xee/255,0xf2/255,0xf4/255), "hc-light":(true,1,1,1)]
+    func applyTheme(_ name: String) {
+        guard let t = AppDelegate.themeBackgrounds[name] else { return }
+        let color = NSColor(srgbRed: t.r, green: t.g, blue: t.b, alpha: 1)
+        window.appearance = NSAppearance(named: t.light ? .aqua : .darkAqua)
+        window.backgroundColor = color
+        web.underPageBackgroundColor = color
+    }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "theme" {
+            if let body = message.body as? [String:Any], let name = body["theme"] as? String, AppDelegate.themeBackgrounds[name] != nil {
+                UserDefaults.standard.set(name, forKey: "OMTheme")
+                applyTheme(name)
+            }
+            return
+        }
         guard message.name == "displayWindow", let options = message.body as? [String:Any],
               let small = options["compact"] as? Bool, let onTop = options["alwaysOnTop"] as? Bool else { return }
         UserDefaults.standard.set(small,forKey:"OMCompact")
         UserDefaults.standard.set(onTop,forKey:"OMOnTop")
         window.level = onTop ? .floating : .normal
-        window.title = "OM Power Control · OM4001A Experimental" + (small ? " · Compact" : "") + (onTop ? " · On top" : "")
+        window.title = "OM Power Control · Prerelease 2" + (small ? " · Compact" : "") + (onTop ? " · On top" : "")
         if small != compact {
             if small {
                 if window.frame.width >= 700 {
