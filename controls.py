@@ -27,11 +27,12 @@ def blocked(state,action):
  return state.get('controls_verified') is False and not (state.get('basic_controls') is True and action in BASIC_ACTIONS)
 
 class Controls:
- def __init__(self):self.pending=None;self.message='';self.uncertain=False;self.seen=set();self.last_sent=float('-inf')
- def request(self,action,key,state,expected_mode=None):
+ def __init__(self):self.pending=None;self.message='';self.uncertain=False;self.seen=set();self.last_sent=float('-inf');self.last_secret=False;self.rejections=0
+ def request(self,action,key,state,expected_mode=None,password=None):
   now=time.monotonic()
   if action not in COMMANDS:raise ValueError('Unknown control')
   if not isinstance(key,str) or not 8<=len(key)<=100:raise ValueError('Invalid request identifier')
+  if password is not None and (action!='autotune' or not isinstance(password,str) or not 1<=len(password)<=10 or not all(33<=ord(c)<=126 and c!=';' for c in password)):raise ValueError('The admin password is 1 to 10 characters, without semicolons')
   if key in self.seen:return
   if self.pending or self.uncertain:raise ValueError('Wait for confirmation; reconnect after an unconfirmed result')
   if state.get('connection')!='Connected' or now-state.get('_received',0)>3:raise ValueError('Fresh amplifier communication is required')
@@ -50,7 +51,7 @@ class Controls:
   if action!='autotune-stop' and now-self.last_sent<2:raise ValueError('Please wait before sending another command')
   self.seen.add(key)
   if len(self.seen)>1000:raise ValueError('Reconnect before sending additional commands')
-  self.pending={'id':key,'action':action,'sent':None,'expected_mode':expected_mode,'exit_after_rf_abort':action=='autotune-exit' and state.get('autotune_phase')=='aborted','exit_abort_origin':state.get('autotune_abort_origin') if action=='autotune-exit' and state.get('autotune_phase')=='aborted' else None};self.message='Command queued'
+  self.pending={'id':key,'action':action,'password':password,'unlock':0 if password is not None else None,'sent':None,'expected_mode':expected_mode,'exit_after_rf_abort':action=='autotune-exit' and state.get('autotune_phase')=='aborted','exit_abort_origin':state.get('autotune_abort_origin') if action=='autotune-exit' and state.get('autotune_phase')=='aborted' else None};self.message='Command queued'
  def take(self,state):
   if not self.pending or self.pending['sent'] is not None:return None
   reason=None
@@ -71,10 +72,26 @@ class Controls:
   if reason:
    self.pending=None;self.message='Command cancelled: '+reason;return None
   self.pending['ever_sent']=True;self.pending['sent']=time.monotonic();self.last_sent=self.pending['sent'];self.message='Sent once; waiting for amplifier confirmation'
+  self.last_secret=False
+  if self.pending['action']=='autotune' and self.pending.get('unlock') in (0,1):
+   # Admin unlock before tuning (vendor protocol): P, wait for 06H, then the password ending with ';', wait for POK;.
+   if self.pending['unlock']==0:self.message='Unlocking tuning: waiting for the amplifier to accept the password step';return b'P'
+   secret=self.pending['password'];self.pending['password']=None;self.last_secret=True;self.message='Password sent once; waiting for the amplifier'
+   return secret.encode('ascii')+b';'
   return b'&' if self.pending['action']=='autotune' and self.pending.get('stage')==1 else COMMANDS[self.pending['action']][0]
  def observe(self,tokens):
   if not self.pending or self.pending['sent'] is None:return
   action=self.pending['action']
+  if action=='autotune' and self.pending.get('unlock') in (0,1):
+   if self.pending['unlock']==0:
+    if 'NAK' in tokens:self.pending=None;self.message='Amplifier is not ready for the admin password. No retry was sent.'
+    elif 'ACK' in tokens:self.pending.update(unlock=1,sent=None);self.message='Amplifier ready for the admin password'
+   elif 'PSWFAIL' in tokens:self.pending=None;self.rejections+=1;self.message='Amplifier rejected the admin password. No retry was sent.'
+   elif 'POK' in tokens:self.pending.update(unlock=2,sent=None);self.message='Admin mode unlocked; entering automatic tuning'
+   return
+  if action in ('autotune','autotune-exit','autotune-stop') and 'BADPSW' in tokens:
+   # The amplifier refused the command: the outcome is known, nothing took effect, so this is not an uncertain result.
+   self.pending=None;self.message='Amplifier refused the command (admin password required before tuning). No retry was sent.';return
   if action=='autotune':
    if self.pending.get('stage',0)==0 and 'AUTO' in tokens:
     self.pending.update(stage=1,sent=None);self.message='Automatic mode acknowledged; preparing tuning';return
@@ -102,4 +119,4 @@ class Controls:
  def lost(self):
   if self.pending:
    sent=self.pending.get('ever_sent',self.pending['sent'] is not None);self.pending=None;self.uncertain=sent;self.message='Connection lost; command result unknown. No retry was sent.' if sent else 'Unsent command cancelled'
- def view(self):return {'pending':self.pending is not None,'pending_action':self.pending['action'] if self.pending else None,'cooldown_remaining':max(0,round(2-(time.monotonic()-self.last_sent),2)),'uncertain':self.uncertain,'message':self.message}
+ def view(self):return {'pending':self.pending is not None,'pending_action':self.pending['action'] if self.pending else None,'cooldown_remaining':max(0,round(2-(time.monotonic()-self.last_sent),2)),'uncertain':self.uncertain,'password_rejections':self.rejections,'message':self.message}

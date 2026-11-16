@@ -2,7 +2,7 @@ import Cocoa
 import WebKit
 import Darwin
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMessageHandler, WKScriptMessageHandlerWithReply, WKUIDelegate, WKNavigationDelegate {
     var window: NSWindow!
     var web: WKWebView!
     var process: Process?
@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
         let config = WKWebViewConfiguration()
         config.userContentController.add(self, name: "displayWindow")
         config.userContentController.add(self, name: "theme")
+        config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "keychain")
         let savedCompact=UserDefaults.standard.bool(forKey:"OMCompact")
         let savedTop=UserDefaults.standard.bool(forKey:"OMOnTop")
         let savedTheme=AppDelegate.themeBackgrounds[UserDefaults.standard.string(forKey:"OMTheme") ?? ""] != nil ? UserDefaults.standard.string(forKey:"OMTheme")! : "dark"
@@ -111,6 +112,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
         window.appearance = NSAppearance(named: t.light ? .aqua : .darkAqua)
         window.backgroundColor = color
         web.underPageBackgroundColor = color
+    }
+    // Admin password bridge for the page: get / set / delete. Replies with the password (get) or a success flag.
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {
+        guard message.name == "keychain", let body = message.body as? [String: Any], let op = body["op"] as? String else { replyHandler(nil, "Unsupported request"); return }
+        let store = AdminKeychain()
+        switch op {
+        case "get": replyHandler(store.read() ?? NSNull(), nil)
+        case "set": replyHandler(store.save(body["password"] as? String ?? ""), nil)
+        case "delete": replyHandler(store.delete(), nil)
+        default: replyHandler(nil, "Unsupported request")
+        }
     }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         if message.name == "theme" {

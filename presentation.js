@@ -179,6 +179,11 @@ function secondaryMeter(s,key='reflected'){
 }
 if(typeof module!=='undefined'){module.exports.secondaryMeter=secondaryMeter;module.exports.SECONDARY_PROFILES=SECONDARY_PROFILES;}
 
+/* Amateur band for a frequency in kHz, or null (used to label the tuning popup). */
+const BANDS_KHZ=[['160 m',1800,2000],['80 m',3500,4000],['60 m',5250,5450],['40 m',7000,7300],['30 m',10100,10150],['20 m',14000,14350],['17 m',18068,18168],['15 m',21000,21450],['12 m',24890,24990],['10 m',28000,29700],['6 m',50000,54000]];
+function bandFor(khz){if(typeof khz!=='number'||!Number.isFinite(khz))return null;const b=BANDS_KHZ.find(x=>khz>=x[1]&&khz<=x[2]);return b?b[0]:null}
+if(typeof module!=='undefined')module.exports.bandFor=bandFor;
+
 function autotunePresentation(s,pending=false){
  const phase=s.autotune_phase||'idle',active=['entered','waiting','tuning','unknown','aborted'].includes(phase),link=s.connection==='Connected'&&!(s.age_seconds>freshSeconds(s));
  let reason='';if(s.readiness_test)reason='No-RF readiness test: commands are managed by the test; do not transmit.';else if(s.power_test)reason='Restricted power-cycle test: tuning commands are blocked.';else if(s.mode_test)reason='Restricted Operate/Standby test: tuning commands are blocked.';else if(s.read_only)reason='Read-only telemetry: operating and tuning commands are blocked.';else if(!controlsVerified(s,false))reason='Auto-tune is verified only for OM-3501A.';else if(s.fault)reason='Amplifier fault active: commands are blocked. '+s.fault.text;else if(s.model_pending)reason='Waiting for the amplifier to report its model before enabling controls.';else if(!link)reason='Fresh amplifier communication is required.';else if(pending||s.control?.pending)reason='Waiting for command confirmation.';else if(s.control?.uncertain)reason='Command result uncertain; check amplifier. No retry was sent.';else if(s.rf_state_unknown)reason='RF state is unconfirmed; keep RF off and check the amplifier.';else if(s.transmitting)reason='Stop RF before using tuning controls.';else if(s.control?.cooldown_remaining>0)reason='Please wait before another command.';
@@ -191,7 +196,10 @@ function autotunePresentation(s,pending=false){
  const stopBlocked=s.model_pending||s.read_only||s.mode_test||s.power_test||s.readiness_test||!controlsVerified(s,false)||!link||pending||s.control?.pending||s.control?.uncertain||phase!=='tuning';
  const pct=v=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(1)+' %':null;
  const parts=[['Load',pct(s.load_pct)],['Tune',pct(s.tune_pct)]].filter(x=>x[1]).map(x=>x.join(' '));
+ const fresh=link&&phase!=='idle'&&!(active&&s.autotune_age_seconds>15),num=v=>typeof v==='number'&&Number.isFinite(v)?v:null;
+ const gauges={tune:fresh?num(s.tune_pct):null,load:fresh?num(s.load_pct):null,offset:fresh?num(s.autotune_offset_raw):null,inputW:fresh?num(s.input):null,band:bandFor(s.frequency_khz)};
+ gauges.offsetDb=gauges.offset!==null&&gauges.offset>=0&&gauges.offset<=200?(100-gauges.offset)/18:null;
  const positions=link&&phase!=='idle'&&!(active&&s.autotune_age_seconds>15)&&parts.length?'Capacitor positions · '+parts.join(' · '):'';
- return {positions,stopDisabled:!!stopBlocked||!!(s.tune_test&&s.tune_test_counts?.['8']),phase,title,detail,visible:phase!=='idle',startDisabled:!!reason||active||s.status!=='Operate'||!!(s.tune_test&&s.tune_test_counts?.L),exitDisabled:!!reason||!!(s.tune_test&&s.tune_test_counts?.['*'])||(phase!=='waiting'&&!(phase==='aborted'&&['rf_lost','stop'].includes(s.autotune_abort_origin))),reason};
+ return {positions,gauges,stopDisabled:!!stopBlocked||!!(s.tune_test&&s.tune_test_counts?.['8']),phase,title,detail,visible:phase!=='idle',startDisabled:!!reason||active||s.status!=='Operate'||!!(s.tune_test&&s.tune_test_counts?.L),exitDisabled:!!reason||!!(s.tune_test&&s.tune_test_counts?.['*'])||(phase!=='waiting'&&!(phase==='aborted'&&['rf_lost','stop'].includes(s.autotune_abort_origin))),reason};
 }
 if(typeof module!=='undefined')module.exports.autotunePresentation=autotunePresentation;

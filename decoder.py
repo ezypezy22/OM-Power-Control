@@ -47,6 +47,9 @@ class Decoder:
             # binary frame or inside an ASCII token: both must retain framing.
             if self.buffer[0]==0:
                 self.buffer=self.buffer.lstrip(b'\x00');continue
+            if self.buffer[0] in (6,21):
+                # 06H ready/accepted, 15H not ready: single bytes with no terminator (vendor protocol).
+                self.tokens.append('ACK' if self.buffer[0]==6 else 'NAK');self.buffer=self.buffer[1:];updates.append(dict(self.state));continue
             if self.buffer[0]==61:
                 if len(self.buffer)<10:break
                 if self.buffer[9]!=59:raise ValueError('Malformed binary measurement')

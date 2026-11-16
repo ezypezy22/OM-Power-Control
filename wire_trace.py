@@ -29,10 +29,12 @@ class TracedSocket:
  def __init__(self,sock,trace):self.sock=sock;self.trace=trace
  def sendall(self,data):
   started=time.monotonic()
+  shown='redacted' if getattr(self.trace,'redact_next',False) else data.hex()
+  self.trace.redact_next=False
   try:result=self.sock.sendall(data)
   except OSError as exc:
-   self.trace.record('tx_error',hex=data.hex(),error=str(exc));raise
-  self.trace.record('tx',hex=data.hex(),duration_seconds=round(time.monotonic()-started,6));return result
+   self.trace.record('tx_error',hex=shown,error=str(exc));raise
+  self.trace.record('tx',hex=shown,duration_seconds=round(time.monotonic()-started,6));return result
  def recv(self,size):
   started=time.monotonic()
   try:data=self.sock.recv(size)

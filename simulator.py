@@ -26,6 +26,10 @@ class SimulatedAmplifier:
      self.phase='tuning';self.started=time.monotonic();self.emit(b'AUTO:AUTOTUNE IN PROGRESS;')
     elif not rf and self.phase=='tuning':
      self.phase='aborted';self.abort_origin='rf_lost';self.emit(b'AUTO:AUTOTUNE ABORTED;')
+ def emit_positions(self):
+  # Capacitor positions in 1/30 %: the tune capacitor settles at 20.1 %, the load at 62.5 % (synthetic).
+  progress=min(1.0,(time.monotonic()-self.started)/4)
+  self.emit(b'TU%d;LO%d;OT%d;'%(round(300+(603-300)*progress),round(900+(1875-900)*progress),round(40+(100-40)*progress)))
  def advance(self):
   now=time.monotonic()
   if self.transition and now>=self.transition[0]:
@@ -49,6 +53,8 @@ class SimulatedAmplifier:
     self.emit(b'IP850;UP2900;US300;UGA75;UGB150;UHA12;UHB12;UM240;TE64;')
     if self.rf:
      forward=700 if self.phase=='tuning' else 1200
+     if self.phase=='tuning':
+      self.emit_positions()
      self.emit(b'='+forward.to_bytes(2,'little')+bytes([5,20,2,0,0,0])+b';')
     else:self.emit(b'PTTOFF;')
    elif data==b'O':self.mode='Standby' if self.mode=='Operate' else 'Operate';self.emit(b'STBY;' if self.mode=='Standby' else b'OPERATE;')
@@ -83,6 +89,8 @@ class Simulated4001A(SimulatedAmplifier):
     def __init__(self,warmup_seconds=180,cooldown_seconds=45,clock=time.monotonic,start='Off'):
         super().__init__();self.clock=clock;self.warmup=warmup_seconds;self.cooldown=cooldown_seconds
         self.mode=start;self.mode_started=clock();self.countdown=None;self.last_batch=None;self.last_temp=None;self.hard_fault=None
+        # Tuning is an admin feature on the real amplifier: L answers BADPSW; until P and the password are accepted.
+        self.password=b'0000000000';self.admin=False;self.expect_password=False
     def _begin(self,mode):self.mode=mode;self.mode_started=self.clock()
     def set_power(self,on):
         with self.lock:
@@ -140,7 +148,13 @@ class Simulated4001A(SimulatedAmplifier):
                     self.last_batch=now;self.emit(self.batch())
                 if self.rf:
                     forward=1700 if self.phase=='tuning' else 2400
+                    if self.phase=='tuning':self.emit_positions()
                     self.emit(b'='+forward.to_bytes(2,'little')+bytes([5,20,2,0,0,0])+b';')
+            elif data==b'P':self.sent.append(data);self.advance();self.expect_password=True;self.emit(b'\x06')
+            elif self.expect_password and data.endswith(b';'):
+                self.sent.append(b'<password>');self.advance();self.expect_password=False;self.admin=data[:-1]==self.password
+                self.emit(b'POK;' if self.admin else b'PSWFAIL;')
+            elif data==b'L' and not self.admin:self.sent.append(data);self.advance();self.emit(b'BADPSW;')
             elif data==b'F':self.sent.append(data);self.advance();self.emit(b'FR18100;')
             elif data==b'1':self.sent.append(data);self.advance();self.emit(b'INFO:0001,0000001,0000002,03.42,55756,OM4001A;')
             elif data==b'Y':

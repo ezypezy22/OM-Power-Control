@@ -131,3 +131,24 @@ class FanTests(unittest.TestCase):
   for sim in (Simulated4001A(),SimulatedAmplifier()):
    sim.sendall(b'2');self.assertEqual(drain(sim),b'BLOWER:TEMP;')
    sim.sendall(b'5');self.assertEqual(drain(sim),b'BLOWER:ALWAYS;')
+
+class UnlockSimTests(unittest.TestCase):
+ def test_tuning_needs_the_admin_password_on_the_4001a(self):
+  sim=Simulated4001A(start='Operate');sim.sendall(b'L');self.assertEqual(drain(sim),b'BADPSW;')
+  sim.sendall(b'P');self.assertEqual(drain(sim),b'\x06');sim.sendall(b'wrong;');self.assertEqual(drain(sim),b'PSWFAIL;')
+  sim.sendall(b'P');drain(sim);sim.sendall(b'0000000000;');self.assertEqual(drain(sim),b'POK;')
+  sim.sendall(b'L');self.assertEqual(drain(sim),b'AUTO;')
+ def test_decoder_keeps_ack_bytes_apart_from_the_next_reply(self):
+  d=Decoder();d.feed(b'\x06POK;');self.assertEqual(d.tokens,['ACK','POK'])
+
+class TunePositionTests(unittest.TestCase):
+ def test_positions_are_reported_while_tuning_and_decode_to_percent(self):
+  for sim in (SimulatedAmplifier(),Simulated4001A(start='Operate')):
+   sim.phase='tuning';sim.rf=True;sim.started=time.monotonic()-3;sim.sendall(b'#');d=Decoder();d.feed(drain(sim))
+   self.assertTrue(10<d.state['tune_pct']<=20.1,d.state);self.assertTrue(30<d.state['load_pct']<=62.5,d.state)
+
+class OffsetTests(unittest.TestCase):
+ def test_offset_value_follows_the_vendor_scale(self):
+  d=Decoder();d.feed(b'OT10;OT100;');self.assertEqual(d.state['autotune_offset_raw'],100)
+  sim=SimulatedAmplifier();sim.phase='tuning';sim.rf=True;sim.started=time.monotonic()-3;sim.sendall(b'#');d=Decoder();d.feed(drain(sim))
+  self.assertTrue(40<=d.state['autotune_offset_raw']<=100)

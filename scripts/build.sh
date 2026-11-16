@@ -5,7 +5,7 @@ APP="${OM_BUILD_APP:-$PWD/dist/OM Power Control.app}"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" /tmp/om3501a-swift-cache
 # Give each native build a distinct Mach-O UUID so review copies cannot collide
 # with the installed app in macOS Local Network privacy attribution.
-swiftc -target arm64-apple-macos14.0 -module-cache-path /tmp/om3501a-swift-cache -O Sources/App.swift Sources/WindowPlacement.swift -framework Cocoa -framework WebKit -Xlinker -random_uuid -o "$APP/Contents/MacOS/OM3501AControl"
+swiftc -target arm64-apple-macos14.0 -module-cache-path /tmp/om3501a-swift-cache -O Sources/App.swift Sources/WindowPlacement.swift Sources/AdminKeychain.swift -framework Cocoa -framework WebKit -Xlinker -random_uuid -o "$APP/Contents/MacOS/OM3501AControl"
 BUILD_PYTHON="${OM_BUILD_PYTHON:-python3}"
 PYINSTALLER_CONFIG_DIR=/tmp/om3501a-pyinstaller "$BUILD_PYTHON" -m PyInstaller --noconfirm --onedir --name amp-engine --distpath /tmp/om3501a-frozen --workpath /tmp/om3501a-freeze-work --specpath /tmp/om3501a-freeze-spec --add-data "$PWD/live.html:." --add-data "$PWD/presentation.js:." live.py
 rm -rf "$APP/Contents/Resources/amp-engine"

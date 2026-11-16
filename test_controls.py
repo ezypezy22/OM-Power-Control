@@ -61,3 +61,34 @@ class FanTests(unittest.TestCase):
  def test_fan_follows_the_basic_controls_gate(self):
   with self.assertRaises(ValueError):Controls().request('fan-ptt','request-123',self.state(controls_verified=False))
   Controls().request('fan-ptt','request-123',self.state(controls_verified=False,basic_controls=True))
+
+class RefusalTests(unittest.TestCase):
+ def test_a_password_refusal_is_reported_not_left_uncertain(self):
+  s={'connection':'Connected','_received':time.monotonic(),'status':'Operate','transmitting':False}
+  c=Controls();c.request('autotune','request-123',s);self.assertEqual(c.take(s),b'L')
+  c.observe(['TE60','BADPSW']);self.assertIsNone(c.pending);self.assertFalse(c.uncertain);self.assertIn('refused',c.message)
+
+class UnlockTests(unittest.TestCase):
+ def state(self):return {'connection':'Connected','_received':time.monotonic(),'status':'Operate','transmitting':False}
+ def test_unlock_then_tune_sends_p_password_then_l_once_each(self):
+  s=self.state();c=Controls();c.request('autotune','request-123',s,password='secret')
+  self.assertEqual(c.take(s),b'P');self.assertFalse(c.last_secret);self.assertIsNone(c.take(s))
+  c.observe(['ACK']);self.assertEqual(c.take(s),b'secret;');self.assertTrue(c.last_secret);self.assertIsNone(c.pending['password'])
+  c.observe(['POK']);self.assertEqual(c.take(s),b'L');self.assertFalse(c.last_secret)
+  c.observe(['AUTO']);s['autotune_phase']='entered';self.assertEqual(c.take(s),b'&')
+ def test_rejected_or_unready_unlock_stops_without_retry_or_uncertainty(self):
+  for first,second,text in (('NAK',None,'not ready'),('ACK','PSWFAIL','rejected')):
+   s=self.state();c=Controls();c.request('autotune','request-123',s,password='bad');c.take(s);c.observe([first])
+   if second:c.take(s);c.observe([second])
+   self.assertIsNone(c.pending);self.assertFalse(c.uncertain);self.assertIn(text,c.message);self.assertIsNone(c.take(s))
+ def test_password_is_validated_and_only_for_autotune(self):
+  for bad in ('','x'*11,'a;b','sp ace','é'):
+   with self.assertRaises(ValueError):Controls().request('autotune','request-123',self.state(),password=bad)
+  with self.assertRaises(ValueError):Controls().request('toggle','request-123',self.state(),password='abc')
+
+class RejectionCountTests(unittest.TestCase):
+ def test_a_rejected_password_is_counted_for_the_page(self):
+  s={'connection':'Connected','_received':time.monotonic(),'status':'Operate','transmitting':False}
+  c=Controls();self.assertEqual(c.view()['password_rejections'],0)
+  c.request('autotune','request-123',s,password='bad');c.take(s);c.observe(['ACK']);c.take(s);c.observe(['PSWFAIL'])
+  self.assertEqual(c.view()['password_rejections'],1)

@@ -90,3 +90,11 @@ class FreshnessAndOffTests(unittest.TestCase):
   self.assertEqual(self.snapshot('OM-3501A','Off',grid_a_v=75.0,grid_b_v=150.0)['grid_b_v'],150.0)
   self.assertIsNone(self.snapshot('OM-4001A','Off',grid_a_v=139.0).get('grid_b_v'))
 if __name__=='__main__':unittest.main()
+
+class TuneMinimumTests(unittest.TestCase):
+ def test_measured_minimums_exist_only_for_the_4001a_and_only_for_tested_bands(self):
+  import profiles
+  table=profiles.profile('OM-4001A')['tune_min_input_w']
+  self.assertEqual(table,{'15 m':4,'17 m':6,'10 m':7,'20 m':8,'40 m':8,'12 m':11})
+  for band in ('160 m','80 m','30 m','60 m','6 m'):self.assertNotIn(band,table)
+  self.assertIsNone(profiles.profile('OM-3501A').get('tune_min_input_w'))

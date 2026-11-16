@@ -161,7 +161,7 @@ class Monitor:
   with self.lock:self.settings=settings.save({**self.settings,**value})
  def trace_command(self,phase,pending,message=''):
   if pending:self.command_history.append({'time':round(time.time(),3),'phase':phase,'source':pending.get('source','standalone'),'action':pending.get('action'),'id':pending.get('id'),'message':message[:300]})
- def command(self,action,key,expected_mode=None,source='standalone'):
+ def command(self,action,key,expected_mode=None,source='standalone',password=None):
   with self.lock:
    pending={'action':str(action)[:20],'id':str(key)[:100],'source':'DXC' if source=='DXC' else 'standalone'}
    try:
@@ -195,7 +195,8 @@ class Monitor:
       if expected_mode!=('Standby' if self.mode_test_sent==0 else 'Operate'):raise ValueError('Mode test requires Standby to Operate, then Operate to Standby')
     if blocked(self.control_state(),action):raise ValueError('Monitoring only: controls are unverified for this model' if action in BASIC_ACTIONS else 'Monitoring only: tuning is not verified for this model')
     duplicate=key in self.controls.seen if isinstance(key,str) else False
-    self.controls.request(action,key,self.control_state(),expected_mode)
+    if action=='autotune' and self.profile_now().get('tune_password') is True and not password and key not in self.controls.seen:raise ValueError('Enter the admin password to unlock tuning')
+    self.controls.request(action,key,self.control_state(),expected_mode,password if self.profile_now().get('tune_password') is True else None)
    except ValueError as exc:self.trace_command('rejected',pending,str(exc));raise
    if self.controls.pending and not duplicate:self.controls.pending['source']=pending['source']
    self.trace_command('duplicate ignored' if duplicate else 'queued',pending,self.controls.message)
@@ -276,6 +277,7 @@ class Monitor:
       if self.mode_test:
        if command!=b'O' or self.mode_test_sent>=2 or self.state.get('status')!=('Standby' if self.mode_test_sent==0 else 'Operate'):raise ValueError('Mode-test socket policy blocked an unauthorized command')
        self.mode_test_sent+=1
+      if self.trace is not None and self.controls.last_secret:self.trace.redact_next=True   # the password must never reach a trace file
       sock.sendall(command);next_status=now+2
       with self.lock:self.trace_command('sent',self.controls.pending)
      if now>=next_status and not command and not dec.state.get('transmitting') and dec.state.get('status') not in ('Warming up','Cooling down','Off') and dec.state.get('autotune_phase') not in ('entered','waiting','tuning','unknown','aborted'):
@@ -384,7 +386,7 @@ class Handler(BaseHTTPRequestHandler):
     size=int(self.headers.get('Content-Length','0'))
     if size>1024:raise ValueError('Request too large')
     value=json.loads(payload)
-    self.server.monitor.command(self.path.rsplit('/',1)[-1],value.get('id'),value.get('expected_mode'))
+    self.server.monitor.command(self.path.rsplit('/',1)[-1],value.get('id'),value.get('expected_mode'),password=value.get('password'))
    except (ValueError,TypeError,AttributeError) as e:
     self.send(409,json.dumps({'error':str(e)}).encode());return
   else:self.send(404,b'{}');return
