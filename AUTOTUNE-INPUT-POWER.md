@@ -5,8 +5,7 @@ The amplifier waits in **Waiting for input power** until the drive on the band i
 protocol document (checked: the PDF is plain text and has no tuning-power table), so it is being measured on
 real hardware here. Check the OM-4001A user manual too; if it publishes a table, record it below and note the source.
 
-This page is a measurement log. It holds no vendor figures yet. Do not copy numbers into the app (profiles) until
-a band has been measured at least twice, or confirmed from the manual.
+This page is an operator measurement log, not a manufacturer drive-power specification. The current profile contains the single-measurement figures below as advisory fallback text only; they have not met a repeated-measurement validation threshold. Repeat measurements or confirm against the manual before treating them as established thresholds. The amplifier’s live prompt takes precedence; all drive remains subject to manufacturer limits.
 
 ## How to measure
 

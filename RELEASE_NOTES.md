@@ -1,3 +1,19 @@
+OM Power Control 0.1.35 prerelease 4 (build 46)
+
+Build 46: tuning window now shows frequency in the header and numeric SWR using the main meter’s green/brown/red scale. Removes the band label. Adds the Screen Current (Iscreen) meter between Load Position and Output Power for OM3501A only; other reported models omit it. Stale/disconnected readings remain unavailable.
+
+- Integrates PR #11: redesigned full/compact views, prominent SWR and fixed reflected/input meters, auxiliary fan controls, selectable colour themes and an OM2501A monitoring-only profile.
+- Enables OM4001A operating controls and password-unlocked automatic tuning based on operator-reported firmware 3.42 testing. Unknown models remain monitoring only; warm-up/cooling, transmission, fault, freshness and command-confirmation guards remain enforced.
+- Remembers a typed admin password only after the amplifier accepts it. A rejected typed password does not replace/delete a working saved password. Saved passwords use a private, unencrypted local file; Settings offers Forget. Passwords are excluded from snapshots and redacted in traces.
+- Adds a dedicated automatic-tuning window with Tune/Load positions, tuning offset, power/input feedback and current-tune RF-stop alerts. Confirmed RF-off settles the alert so later normal transmission stays silent.
+- Confirms Exit from the amplifier's tuning-status flag when no explicit exit acknowledgment is supplied. Stop/Exit wait longer for confirmation and accept bounded late replies; uncertain results are not retried.
+- Clears stale “Automatic tuning ready” feedback when the amplifier leaves the waiting phase, including successful tuning and result dismissal. Preserves readiness for a new waiting tune and preserves pending/uncertain command warnings.
+- Preserves the DX Caliber shared measurement when saving unrelated settings. Normal app identity/settings are retained; preview-specific identities and folders are not used.
+
+Local candidate validation: 344 Python tests, 340 passed and four expected skips (two optional private captures and two Windows-only named-object checks); all eleven JavaScript suites passed, including the actual UI readiness regression. Swift typecheck and Mac build/signature verification passed. No live amplifier operations were executed.
+
+Validation and limits: see TESTING-OM4001A.md for operator evidence and remaining fan-setting, native-theme and status-confirmed Exit checks. Manufacturer guidance on Stop while RF remains applied is outstanding; the automatic Stop-then-Exit workaround stays disabled. No manual-tuning controls are included. The operator supplies/stops RF and sets drive; the app never keys the radio.
+
 OM Power Control 0.1.34 for Mac
 
 - Adds amplifier-reported model, serial number, firmware and operating time; compact electrical readings; Load/Tune position percentages; cooling temperature; warning/fault displays.
