@@ -26,8 +26,8 @@ class Tests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,{'OM_SETTINGS_PATH':str(Path(d)/'prefs.json')}):
    old={k:v for k,v in settings.DEFAULTS.items() if k!='model'}
    self.assertEqual(settings.validate(old)['model'],'OM-3501A')
-   m=Monitor();m.configure({**m.settings,'model':'om-4001a'})
-   self.assertEqual(settings.load()['model'],'OM-4001A')
+   m=Monitor();m.configure({**m.settings,'model':'om-4001c'})
+   self.assertEqual(settings.load()['model'],'OM-4001C')
    for action in ('toggle','on','off'):
     with self.assertRaisesRegex(ValueError,'Monitoring only'):m.command(action,'test-request-123')
    self.assertIsNone(m.controls.pending)
@@ -47,3 +47,12 @@ class Tests(unittest.TestCase):
   for v in ({**settings.DEFAULTS,'port':0},{**settings.DEFAULTS,'host':'bad/host'},{**settings.DEFAULTS,'port':True}):
    with self.assertRaises(ValueError):settings.validate(v)
 if __name__=='__main__':unittest.main()
+
+class SharedMeasurementPreservationTests(unittest.TestCase):
+ def test_unrelated_settings_save_preserves_companion_measurement(self):
+  from live import Monitor
+  with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,{'OM_SETTINGS_PATH':str(Path(d)/'prefs.json')}):
+   m=Monitor();m.configure_display({'secondary_measurement':'input'})
+   m.configure({'callsign':'W1AW'})
+   self.assertEqual(m.settings['secondary_measurement'],'input')
+   self.assertEqual(settings.load()['secondary_measurement'],'input')

@@ -1,7 +1,7 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const html=fs.readFileSync(__dirname+'/live.html','utf8');
 const script=html.split('<script>')[1].split('</script>')[0].replace('__PRESENTATION__',fs.readFileSync(__dirname+'/presentation.js','utf8'));
-const nodes={},node=id=>nodes[id]??={textContent:'',value:'',disabled:false,hidden:false,checked:false,dataset:{},style:{},classList:{toggle(){},remove(){}},setAttribute(){},removeAttribute(){}};
+const nodes={},node=id=>nodes[id]??={options:[{value:'OM-3501A'},{value:'OM-4001A'}],add(){},textContent:'',value:'',disabled:false,hidden:false,checked:false,dataset:{},style:{},classList:{toggle(){},remove(){}},setAttribute(){},removeAttribute(){}};
 const posts=[],native=[],listeners={};
 let state={simulated:true,connection:'Connected',status:'Standby',transmitting:false,age_seconds:0,control:{},settings:{host:'simulation',model:'OM-3501A',port:10001,auto_connect:false}};
 const ctx=vm.createContext({document:{getElementById:node,body:{classList:{toggle(){}}}},window:{omPreferences:{compact:true,alwaysOnTop:true},addEventListener:(name,fn)=>listeners[name]=fn,pywebview:{api:{display_window:async value=>native.push(value)}}},localStorage:{getItem(){},setItem(){}},crypto:{randomUUID:()=> 'offline-ui-123'},setTimeout(){},confirm:()=>true,fetch:async(path,o)=>{if(o?.method==='POST')posts.push({path,body:JSON.parse(o.body||'{}')});return {ok:true,json:async()=>path==='/state'?state:{}};}});

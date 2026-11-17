@@ -47,6 +47,9 @@ class Decoder:
             # binary frame or inside an ASCII token: both must retain framing.
             if self.buffer[0]==0:
                 self.buffer=self.buffer.lstrip(b'\x00');continue
+            if self.buffer[0] in (6,21):
+                # 06H ready/accepted, 15H not ready: single bytes with no terminator (vendor protocol).
+                self.tokens.append('ACK' if self.buffer[0]==6 else 'NAK');self.buffer=self.buffer[1:];updates.append(dict(self.state));continue
             if self.buffer[0]==61:
                 if len(self.buffer)<10:break
                 if self.buffer[9]!=59:raise ValueError('Malformed binary measurement')
@@ -75,6 +78,13 @@ class Decoder:
                 if re.fullmatch(r'ST[0-9AF][01][01]1[01-]\s*.*',token):
                     self.mark('rf');self._saved_tune_release=False;self._last_plate_current=None
                     self.state.update(transmitting=True,rf_idle_confirmed=False,rf_idle_source=None)
+                # STxabcd: d is 1 manual tuning, 0 automatic tuning, - not tuning (vendor rev.4). A status with '-' while the
+                # app still shows a tune means the amplifier has left tuning mode (the OM-4001A exits silently on *).
+                tune_flag=re.fullmatch(r'ST[0-9AF]\d{3}([-01]).*',token)
+                if tune_flag:
+                    self.state['tune_mode']={'-':None,'0':'auto','1':'manual'}[tune_flag.group(1)]
+                    if tune_flag.group(1)=='-' and self.state.get('autotune_phase') in ('waiting','tuning','unknown','aborted'):
+                        self.state.update(autotune_phase='cancelled',autotune_message='Amplifier left tuning mode',autotune_saved=False,autotune_low_input=False);self.mark('autotune')
                 status_match=re.fullmatch(r'ST([0-9AF]\d{3})-\s*(.*)',token)
                 if status_match:
                     code,name=status_match.groups()
@@ -89,17 +99,20 @@ class Decoder:
                 if token=='AUTO':
                     self.state.pop('load_pct',None);self.state.pop('tune_pct',None)
                     self._last_plate_current=None;self._saved_tune_release=False;self._tune_save_seen=False
-                    self.state.update(autotune_phase='entered',autotune_message='Automatic tuning selected',autotune_saved=False,autotune_aborted=False,autotune_stop_reported=False,autotune_abort_origin=None,autotune_defaults=False,autotune_stopped_saved=False)
+                    self.state.update(autotune_phase='entered',autotune_message='Automatic tuning selected',autotune_low_input=False,autotune_saved=False,autotune_aborted=False,autotune_stop_reported=False,autotune_abort_origin=None,autotune_defaults=False,autotune_stopped_saved=False)
                 elif token=='AUTOESC':self.state.update(autotune_phase='cancelled',autotune_message='Automatic tuning exited',autotune_saved=False)
                 elif token.startswith('AUTO:'):
                     message=token[5:].strip()
                     phases={'WAITING FOR INPUT POWER':'waiting','AUTOTUNE IN PROGRESS':'tuning','AUTOTUNE DONE':'succeeded','AUTOTUNE ABORTED':'aborted'}
-                    phase=phases.get(message,'unknown')
+                    # While the drive is below the band minimum the amplifier keeps waiting and says how much it needs.
+                    low=re.fullmatch(r'INCREASE INPUT POWER ABOVE (\d+(?:\.\d+)?)\s*W\s*!?',message)
+                    phase='waiting' if low else phases.get(message,'unknown')
                     if phase=='aborted':
                         self.state['autotune_aborted']=True
                         self.state['autotune_abort_origin']='stop' if self.state.get('autotune_stop_reported') else 'rf_lost' if self.state.get('rf_idle_confirmed') else 'unknown'
                     if self.state.get('autotune_aborted') and phase in ('waiting','tuning','succeeded'):phase='aborted'
-                    self.state.update(autotune_phase=phase,autotune_message=message,autotune_saved=False)
+                    self.state.update(autotune_phase=phase,autotune_message=message,autotune_saved=False,autotune_low_input=bool(low))
+                    if low:self.state['autotune_min_input_w']=float(low.group(1))
                 elif token=='STOP':self.state.update(autotune_phase='aborted',autotune_aborted=True,autotune_stop_reported=True,autotune_abort_origin='stop',autotune_message='Autotune stopped by operator',autotune_saved=False)
                 elif token.startswith('AUTO'):
                     self.state.update(autotune_phase='unknown',autotune_message=token[:200],autotune_saved=False)
@@ -119,6 +132,7 @@ class Decoder:
                 elif re.fullmatch(r'CT\d+',token):self.state.update(status='Cooling down',cooling_temp_c=int(token[2:]));self.state.pop('countdown',None)
                 elif token in FAULT_TOKENS or re.fullmatch(r'(WG|FA)\d+',token):self.set_alert(token)
                 elif token.startswith('INFO:'):self.set_info(token)
+                elif token in ('BLOWER:TEMP','BLOWER:PTT','BLOWER:ALWAYS'):self.state['fan_mode']=token[7:].lower();self.mark('fan_mode')
                 elif re.fullmatch(r'(WA|CO)\d+',token):self.state.pop('cooling_temp_c',None);self.state.update(status='Warming up' if token[:2]=='WA' else 'Cooling down',countdown=int(token[2:]))
                 elif token in ('PTTON','PTTOFF'):
                     if token=='PTTOFF':self.confirm_rf_idle('ptt-off-message')

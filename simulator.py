@@ -10,7 +10,7 @@ class SimulatedAmplifier:
  def __init__(self):
   self.lock=threading.RLock();self.queue=bytearray();self.remote=False
   self.mode='Standby';self.rf=False;self.phase=None;self.abort_origin=None
-  self.started=0;self.transition=None;self.sent=[];self.scenario='success'
+  self.started=0;self.transition=None;self.sent=[];self.scenario='success';self.fan='TEMP'
  def emit(self,data):self.queue.extend(data)
  # Extra simulator controls a model supports; the page shows them only when listed.
  FEATURES=()
@@ -26,6 +26,10 @@ class SimulatedAmplifier:
      self.phase='tuning';self.started=time.monotonic();self.emit(b'AUTO:AUTOTUNE IN PROGRESS;')
     elif not rf and self.phase=='tuning':
      self.phase='aborted';self.abort_origin='rf_lost';self.emit(b'AUTO:AUTOTUNE ABORTED;')
+ def emit_positions(self):
+  # Capacitor positions in 1/30 %: the tune capacitor settles at 20.1 %, the load at 62.5 % (synthetic).
+  progress=min(1.0,(time.monotonic()-self.started)/4)
+  self.emit(b'TU%d;LO%d;OT%d;'%(round(300+(603-300)*progress),round(900+(1875-900)*progress),round(40+(100-40)*progress)))
  def advance(self):
   now=time.monotonic()
   if self.transition and now>=self.transition[0]:
@@ -41,11 +45,16 @@ class SimulatedAmplifier:
     self.emit({'Operate':b'ST1110- SIMULATED ANTENNA;','Standby':b'ST1100- SIMULATED ANTENNA;','Off':b'ST2000- SIMULATED ANTENNA;','Warming up':b'WA3;','Cooling down':b'CO3;'}[self.mode])
     if not self.rf:self.emit(b'PTTOFF;')
    elif data==b'F':self.emit(b'FR14078;')
+   elif data in (b'2',b'3',b'4',b'5'):
+    if data!=b'2':self.fan={b'3':'TEMP',b'4':'PTT',b'5':'ALWAYS'}[data]
+    self.emit(b'BLOWER:%s;'%self.fan.encode())
    elif data==b'1':self.emit(b'INFO:0001,0000001,0,03.21,60,OM3501A;')
    elif data==b'#':
     self.emit(b'IP850;UP2900;US300;UGA75;UGB150;UHA12;UHB12;UM240;TE64;')
     if self.rf:
      forward=700 if self.phase=='tuning' else 1200
+     if self.phase=='tuning':
+      self.emit_positions()
      self.emit(b'='+forward.to_bytes(2,'little')+bytes([5,20,2,0,0,0])+b';')
     else:self.emit(b'PTTOFF;')
    elif data==b'O':self.mode='Standby' if self.mode=='Operate' else 'Operate';self.emit(b'STBY;' if self.mode=='Standby' else b'OPERATE;')
@@ -80,6 +89,8 @@ class Simulated4001A(SimulatedAmplifier):
     def __init__(self,warmup_seconds=180,cooldown_seconds=45,clock=time.monotonic,start='Off'):
         super().__init__();self.clock=clock;self.warmup=warmup_seconds;self.cooldown=cooldown_seconds
         self.mode=start;self.mode_started=clock();self.countdown=None;self.last_batch=None;self.last_temp=None;self.hard_fault=None
+        # Tuning is an admin feature on the real amplifier: L answers BADPSW; until P and the password are accepted.
+        self.password=b'0000000000';self.admin=False;self.expect_password=False
     def _begin(self,mode):self.mode=mode;self.mode_started=self.clock()
     def set_power(self,on):
         with self.lock:
@@ -129,7 +140,8 @@ class Simulated4001A(SimulatedAmplifier):
             if data==b'?':
                 self.sent.append(data);self.advance()
                 code={'Operate':b'ST0111' if self.rf else b'ST0110','Standby':b'ST0100'}.get(self.mode,b'ST0000')
-                self.emit(code+self.ANTENNA)
+                # The last status flag is 0 in automatic tuning mode, - otherwise (vendor rev.4).
+                self.emit(code+(b'0'+self.ANTENNA[1:] if self.phase in ('entered','waiting','tuning','aborted','unknown') else self.ANTENNA))
             elif data==b'#':
                 self.sent.append(data);self.advance();now=self.clock()
                 # The amplifier answers this poll only about every 3.2 s, however often it is sent.
@@ -137,7 +149,16 @@ class Simulated4001A(SimulatedAmplifier):
                     self.last_batch=now;self.emit(self.batch())
                 if self.rf:
                     forward=1700 if self.phase=='tuning' else 2400
+                    if self.phase=='tuning':self.emit_positions()
                     self.emit(b'='+forward.to_bytes(2,'little')+bytes([5,20,2,0,0,0])+b';')
+            elif data==b'P':self.sent.append(data);self.advance();self.expect_password=True;self.emit(b'\x06')
+            elif self.expect_password and data.endswith(b';'):
+                self.sent.append(b'<password>');self.advance();self.expect_password=False;self.admin=data[:-1]==self.password
+                self.emit(b'POK;' if self.admin else b'PSWFAIL;')
+            elif data==b'*' and self.phase in ('entered','waiting','tuning','aborted','unknown'):
+                # Real OM-4001A (2026-11-16 trace): Exit leaves tuning mode with PTTOFF only, no AUTOESC or SAVE text.
+                self.sent.append(data);self.advance();self.phase=None;self.abort_origin=None;self.emit(b'PTTOFF;')
+            elif data==b'L' and not self.admin:self.sent.append(data);self.advance();self.emit(b'BADPSW;')
             elif data==b'F':self.sent.append(data);self.advance();self.emit(b'FR18100;')
             elif data==b'1':self.sent.append(data);self.advance();self.emit(b'INFO:0001,0000001,0000002,03.42,55756,OM4001A;')
             elif data==b'Y':
@@ -145,7 +166,7 @@ class Simulated4001A(SimulatedAmplifier):
                 if self.mode=='Off':self._start_warmup()
             elif data==b'Z':
                 self.sent.append(data);self.advance()
-                if self.mode in ('Standby','Operate'):self._start_cooldown()
+                if self.mode in ('Standby','Operate','Warming up'):self._start_cooldown()
             elif data==b'O' and self.mode not in ('Standby','Operate'):
                 # The amplifier answers O only when fully on.
                 self.sent.append(data);self.advance()

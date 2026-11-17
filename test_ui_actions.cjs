@@ -1,18 +1,23 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const html=fs.readFileSync(__dirname+'/live.html','utf8');
 const script=html.split('<script>')[1].split('</script>')[0].replace('__PRESENTATION__',fs.readFileSync(__dirname+'/presentation.js','utf8'));
-const nodes={};const node=id=>nodes[id]??=( {id,textContent:'',value:'',disabled:false,hidden:false,checked:false,title:'',style:{},setAttribute(){},removeAttribute(){},dataset:{},classList:{toggle(){},remove(){}}} );
+const nodes={};const node=id=>nodes[id]??=( {id,options:[{value:'OM-3501A'},{value:'OM-4001A'}],add(){},textContent:'',value:'',disabled:false,hidden:false,checked:false,title:'',style:{},setAttribute(){},removeAttribute(){},dataset:{},classList:{toggle(){},remove(){}}} );
 let state={connection:'Connected',status:'Standby',age_seconds:0,control:{},settings:{host:'192.0.2.1',port:10001,callsign:'W1AW',auto_connect:false}};
-const posts=[],confirmations=[];
-const ctx=vm.createContext({document:{getElementById:node,body:{classList:{toggle(){}}}},window:{},localStorage:{getItem(){return null},setItem(){}},crypto:{randomUUID:()=> 'test-request-123'},setTimeout(){},confirm:text=>{confirmations.push(text);return false},fetch:async(path,options)=>{if(options?.method==='POST')posts.push({path,body:JSON.parse(options.body||'{}')});return {ok:true,json:async()=>path==='/state'?state:{}}}});
+const posts=[],confirmations=[],documentEvents={};
+const ctx=vm.createContext({document:{addEventListener:(name,fn)=>documentEvents[name]=fn,getElementById:node,body:{classList:{toggle(){}}}},window:{},localStorage:{getItem(){return null},setItem(){}},crypto:{randomUUID:()=> 'test-request-123'},setTimeout(){},confirm:text=>{confirmations.push(text);return false},fetch:async(path,options)=>{if(options?.method==='POST')posts.push({path,body:JSON.parse(options.body||'{}')});return {ok:true,json:async()=>path==='/state'?state:{}}}});
 vm.runInContext(script,ctx);
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 (async()=>{
  await flush();
+ const about=node('aboutAmp'),inside={};about.contains=target=>target===inside;about.open=true;documentEvents.pointerdown({target:inside});assert.equal(about.open,true);documentEvents.pointerdown({target:{}});assert.equal(about.open,false);documentEvents.pointerdown({target:{}});assert.equal(about.open,false);
+
+ assert.equal(vm.runInContext("amplifierHeading('OM-3501A')",ctx),'OM3501A');assert.equal(vm.runInContext("amplifierHeading('OM-4001A')",ctx),'OM4001A');
+ state={...state,model_profile:{name:'OM-4001A',controls_verified:false},settings:{...state.settings,model:'OM-3501A'}};await vm.runInContext('refresh()',ctx);assert.equal(nodes.modelName.textContent,'OM4001A');state={...state,model_profile:undefined};
+
  state={...state,frequency_khz:7074,temperature_c:23};await vm.runInContext('refresh()',ctx);assert.equal(nodes.frequency.textContent,'7.074 MHz');assert.equal(nodes.temperature.textContent,'23 °C');
  state={...state,frequency_khz:null,temperature_c:null};await vm.runInContext('refresh()',ctx);assert.equal(nodes.frequency.textContent,'— MHz');assert.equal(nodes.temperature.textContent,'— °C');
  assert.equal(nodes.swr.style.color,'#a5b2b6');assert.equal(nodes.reflected.style.color,'#a5b2b6');
- state={...state,transmitting:true,forward:1000,reflected:120,swr:2.1};await vm.runInContext('refresh()',ctx);assert.equal(nodes.swr.style.color,'rgb(229, 103, 88)');assert.equal(nodes.reflected.style.color,nodes.swr.style.color);
+ state={...state,transmitting:true,forward:1000,reflected:120,swr:2.1};await vm.runInContext('refresh()',ctx);assert.equal(nodes.swr.style.color,'rgb(229, 103, 88)');
  state={...state,transmitting:false,forward:0,reflected:0,swr:null};await vm.runInContext('refresh()',ctx);assert.equal(nodes.swr.style.color,'#a5b2b6');
  assert.equal(nodes.stationCall.textContent,'W1AW');assert.equal(nodes.stationCall.hidden,false);
  await nodes.toggle.onclick();assert.equal(confirmations.length,0);assert.equal(posts.length,1);assert.equal(posts[0].path,'/control/toggle');assert.equal(posts[0].body.expected_mode,'Standby');
@@ -20,12 +25,11 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
  state={...state,status:'Off'};await vm.runInContext('refresh()',ctx);await nodes.on.onclick();assert.equal(confirmations.length,2);assert.equal(posts.length,1);
  state={...state,transmitting:true,status:'Operate'};await vm.runInContext('refresh()',ctx);await nodes.toggle.onclick();assert.equal(posts.length,1);
  state={...state,settings:{...state.settings,callsign:''}};await vm.runInContext('loadedSettings=false;refresh()',ctx);assert.equal(nodes.stationCall.hidden,true);
- state={...state,connection:'Connected',age_seconds:0,input:21,plate_a:.86,gain_db:18.3};
- for(const [key,label,value,max] of [['input','INPUT POWER · W','21',100],['plate_a','PLATE CURRENT · A','0.86',3],['gain_db','CALC GAIN · dB','18.3',30],['reflected','REFLECTED · W','0',500]]){
-  nodes.secondaryChoice.value=key;await nodes.secondaryChoice.onchange();await vm.runInContext('refresh()',ctx);
-  assert.equal(nodes.secondaryLabel.textContent,label);assert.equal(nodes.reflected.textContent,value);assert.equal(nodes['metricOption_'+key].disabled,true);
-  assert.equal(posts.at(-1).path,'/display-settings');assert.deepEqual(posts.at(-1).body,{secondary_measurement:key});
- }
+ state={...state,connection:'Connected',age_seconds:0,reflected:0,input:21,gain_db:18.3};await vm.runInContext('refresh()',ctx);
+ // Reflected and input power each have their own bar meter; gain is a small reading. There is no meter picker any more.
+ assert.equal(nodes.secondaryLabel.textContent,'REFLECTED · W');assert.equal(nodes.reflected.textContent,'0');
+ assert.equal(nodes.inputLabel.textContent,'INPUT POWER · W');assert.equal(nodes.inputValue.textContent,'21');
+ assert.equal(nodes.key_gain_db.textContent,'18.3 dB');
  let finishSave;const oldFetch=ctx.fetch;ctx.fetch=()=>new Promise(resolve=>finishSave=resolve);
  const saving=nodes.save.onclick();assert.equal(nodes.save.disabled,true);assert.equal(nodes.save.textContent,'Saving…');assert.equal(nodes.settingsSaveStatus.textContent,'Saving settings…');
  finishSave({ok:true,json:async()=>({})});await saving;assert.equal(nodes.save.disabled,false);assert.equal(nodes.settingsSaveStatus.textContent,'Settings saved.');
@@ -62,5 +66,7 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
  state={...state,info:{model:'<b>X</b>',firmware:'03.42',operating_minutes:1},model_notice:'Amplifier reports X.'};await vm.runInContext('refresh()',ctx);
  assert.ok(!nodes.aboutRows.innerHTML.includes('<b>'));assert.equal(nodes.modelNotice.hidden,false);assert.equal(nodes.modelNotice.textContent,'Amplifier reports X.');
  state={...state,info:undefined,model_notice:''};await vm.runInContext('refresh()',ctx);assert.ok(nodes.aboutRows.innerHTML.includes('Available after connecting.'));assert.equal(nodes.modelNotice.hidden,true);
+ ctx.fetch=oldFetch;state={...state,connection:'Connected',age_seconds:0,transmitting:true,forward:100,reflected:4,swr:1.5};await vm.runInContext('refresh()',ctx);assert.equal(nodes.swr.textContent,'1.5:1');assert.equal(nodes.swr.style.color,'rgb(184, 137, 82)');state={...state,transmitting:false};await vm.runInContext('refresh()',ctx);assert.equal(nodes.swr.textContent,'—');assert.equal(nodes.swr.style.color,'#a5b2b6');assert.equal((html.match(/id="swr"/g)||[]).length,1);assert.match(html,/<div class="swrReadout"[^>]*>[\s\S]*?id="swr"/);
+ assert(!html.includes("secondary_measurement:'reflected'"));
  console.log('Actual UI handlers: toggle skips prompt; power confirmations retained; RF guard and callsign badge pass');
 })().catch(e=>{console.error(e);process.exitCode=1});

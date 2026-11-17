@@ -15,8 +15,8 @@ FAULT_TITLES={'hv_fault':'High-voltage fault','hard_fault':'Hard fault'}
 IDENTIFY_SECONDS=5
 EXTRA_FIELDS=(*SLOW_FIELDS,'screen_ma','frequency_khz')
 HELD_FIELDS=(*SLOW_FIELDS,'frequency_khz')
-from controls import Controls
-import settings
+from controls import Controls,blocked,BASIC_ACTIONS
+import settings,admin_password
 from profiles import profile as model_profile,resolve as resolve_profile
 from collections import deque
 from session_protocol import amplifier_session
@@ -83,6 +83,7 @@ class Monitor:
   field_times=s.pop('_field_times',{})
   now=time.monotonic();age=now-s.pop('_received',now)
   s['age_seconds']=round(age,1)
+  s['admin_password_saved']=admin_password.exists()
   s['sim_features']=list(self.simulator.FEATURES) if self.simulate and self.simulator else []
   s['tune_test']=self.tune_test;s['tune_test_counts']={k.decode('ascii'):v for k,v in self.tune_test_counts.copy().items()}
   s['autotune_age_seconds']=round(now-field_times.get('autotune',now),1)
@@ -161,7 +162,7 @@ class Monitor:
   with self.lock:self.settings=settings.save({**self.settings,**value})
  def trace_command(self,phase,pending,message=''):
   if pending:self.command_history.append({'time':round(time.time(),3),'phase':phase,'source':pending.get('source','standalone'),'action':pending.get('action'),'id':pending.get('id'),'message':message[:300]})
- def command(self,action,key,expected_mode=None,source='standalone'):
+ def command(self,action,key,expected_mode=None,source='standalone',password=None,use_saved=False,remember=False):
   with self.lock:
    pending={'action':str(action)[:20],'id':str(key)[:100],'source':'DXC' if source=='DXC' else 'standalone'}
    try:
@@ -193,12 +194,28 @@ class Monitor:
      if not duplicate:
       if self.mode_test_sent>=2:raise ValueError('Operate/Standby test is complete; further commands are blocked')
       if expected_mode!=('Standby' if self.mode_test_sent==0 else 'Operate'):raise ValueError('Mode test requires Standby to Operate, then Operate to Standby')
-    if not self.profile_now()['controls_verified']:raise ValueError('Monitoring only: controls are unverified for this model')
+    if blocked(self.control_state(),action):raise ValueError('Monitoring only: controls are unverified for this model' if action in BASIC_ACTIONS else 'Monitoring only: tuning is not verified for this model')
     duplicate=key in self.controls.seen if isinstance(key,str) else False
-    self.controls.request(action,key,self.control_state(),expected_mode)
+    needs_password=action=='autotune' and self.profile_now().get('tune_password') is True
+    from_saved=bool(needs_password and use_saved and not password)   # only a password read from the file counts as the saved one
+    if from_saved:
+     password=admin_password.read()
+     if password is None:raise ValueError('No admin password is saved; enter it')
+    if needs_password and not password and key not in self.controls.seen:raise ValueError('Enter the admin password to unlock tuning')
+    self.controls.request(action,key,self.control_state(),expected_mode,password if needs_password else None,stored=from_saved)
+    if needs_password and password and remember and not use_saved and not duplicate:
+     self.controls.pending['remember_password']=password
    except ValueError as exc:self.trace_command('rejected',pending,str(exc));raise
    if self.controls.pending and not duplicate:self.controls.pending['source']=pending['source']
    self.trace_command('duplicate ignored' if duplicate else 'queued',pending,self.controls.message)
+ def observe_controls(self,tokens):
+  pending=self.controls.pending
+  candidate=pending.get('remember_password') if pending and pending.get('unlock')==1 and pending.get('sent') is not None else None
+  self.controls.observe(tokens)
+  if candidate and self.controls.pending is pending and pending.get('unlock')==2:
+   pending.pop('remember_password',None)
+   try:admin_password.save(candidate)
+   except (ValueError,OSError):pass
  def control_state(self):
   """State handed to Controls, rechecked on every request and again immediately before a queued command is sent.
 
@@ -208,7 +225,7 @@ class Monitor:
   model_pending: the INFO reply has not arrived yet and the identification wait has not passed."""
   now=time.monotonic();fault,_=active_fault(self.state,now)
   pending=self.identify_until is not None and not self.state.get('info') and now<self.identify_until
-  return {**self.state,'fault_active':fault is not None,'controls_verified':self.profile_now()['controls_verified'] is True,'model_pending':pending}
+  return {**self.state,'fault_active':fault is not None,'controls_verified':self.profile_now()['controls_verified'] is True,'basic_controls':self.profile_now().get('basic_controls') is True,'stop_exits_tuning':self.profile_now().get('stop_exits_tuning') is True,'tune_password':self.profile_now().get('tune_password') is True,'model_pending':pending}
  def disconnect(self):
   with self.lock:
    self.stop.set()
@@ -253,7 +270,7 @@ class Monitor:
     # The data timeout starts when session setup completes, not before TCP/setup.
     received=time.monotonic()
     sock.sendall(b'?');sock.sendall(b'1')   # 1: one INFO request (model, firmware, hours) per connection
-    next_poll=0;next_frequency=0;next_status=time.monotonic()+2
+    fan_queried=False;next_exit_status=0;next_poll=0;next_frequency=0;next_status=time.monotonic()+2
     with self.lock:self.state={'connection':'Waiting for amplifier data','_received':received};self.identify_until=received+IDENTIFY_SECONDS
     while not self.stop.is_set():
      now=time.monotonic()
@@ -276,6 +293,7 @@ class Monitor:
       if self.mode_test:
        if command!=b'O' or self.mode_test_sent>=2 or self.state.get('status')!=('Standby' if self.mode_test_sent==0 else 'Operate'):raise ValueError('Mode-test socket policy blocked an unauthorized command')
        self.mode_test_sent+=1
+      if self.trace is not None and self.controls.last_secret:self.trace.redact_next=True   # the password must never reach a trace file
       sock.sendall(command);next_status=now+2
       with self.lock:self.trace_command('sent',self.controls.pending)
      if now>=next_status and not command and not dec.state.get('transmitting') and dec.state.get('status') not in ('Warming up','Cooling down','Off') and dec.state.get('autotune_phase') not in ('entered','waiting','tuning','unknown','aborted'):
@@ -284,6 +302,13 @@ class Monitor:
       next_status=now+2
      if now>=next_poll:
       sock.sendall(b'#');next_poll=now+1
+     with self.lock:asking=not command and self.controls.wants_status()
+     if asking and now>=next_exit_status and not dec.state.get('transmitting'):
+      sock.sendall(b'?');next_exit_status=now+1.5   # confirm the amplifier has left tuning mode
+     if not fan_queried and not command and not (self.read_only or self.mode_test or self.power_test or self.readiness_test or self.tune_test) and dec.state.get('info') and not dec.state.get('transmitting'):
+      # 2: one read of the auxiliary fan mode per connection, once INFO shows the model has that command.
+      fan_queried=True
+      if resolve_profile(self.settings.get('model'),dec.state.get('info'))[0].get('fan_control') is True:sock.sendall(b'2')
      with self.lock:waiting=self.controls.pending is not None
      if now>=next_frequency and not command and not waiting and dec.state.get('autotune_phase') not in ('entered','waiting','tuning','unknown','aborted'):
       sock.sendall(b'F');next_frequency=now+5
@@ -307,7 +332,8 @@ class Monitor:
       for key,count in dec.field_revisions.items():
        if field_revisions.get(key)!=count:field_times[key]=received
       with self.lock:
-       previous=self.controls.pending;self.controls.observe(dec.tokens)
+       previous=self.controls.pending;self.observe_controls(dec.tokens)
+       if self.controls.rejected_stored:self.controls.rejected_stored=False;admin_password.forget()   # a wrong stored password must not be sent again
        if previous and self.controls.pending is None:self.trace_command('uncertain' if self.controls.uncertain else 'confirmed',previous,self.controls.message)
        self.state={**updates[-1],'connection':'Connected','_received':received,'_measurement':measurement,'_field_times':dict(field_times)}
   except Exception as e:
@@ -352,6 +378,7 @@ class Handler(BaseHTTPRequestHandler):
    except ValueError as e:
     self.send(409,json.dumps({'error':str(e)}).encode());return
   elif self.path=='/disconnect':self.server.monitor.disconnect()
+  elif self.path=='/admin-password/forget':admin_password.forget()
   elif self.path=='/simulation':
    try:
     if not self.server.monitor.simulate:raise ValueError('Simulation controls are disabled in hardware mode')
@@ -380,7 +407,7 @@ class Handler(BaseHTTPRequestHandler):
     size=int(self.headers.get('Content-Length','0'))
     if size>1024:raise ValueError('Request too large')
     value=json.loads(payload)
-    self.server.monitor.command(self.path.rsplit('/',1)[-1],value.get('id'),value.get('expected_mode'))
+    self.server.monitor.command(self.path.rsplit('/',1)[-1],value.get('id'),value.get('expected_mode'),password=value.get('password'),use_saved=value.get('use_saved') is True,remember=value.get('remember') is True)
    except (ValueError,TypeError,AttributeError) as e:
     self.send(409,json.dumps({'error':str(e)}).encode());return
   else:self.send(404,b'{}');return
@@ -401,7 +428,7 @@ def main():
  hardware=a.hardware or a.read_only
  from instance_lock import InstanceLock,READER_MUTEX
  if not hardware:os.environ.setdefault('OM_SETTINGS_PATH',str(settings.data_directory()/'simulation-settings.json'))
- lock=InstanceLock(settings.data_directory()/'instance.lock',name=READER_MUTEX)
+ lock=InstanceLock(settings.location().parent/'instance.lock',name=READER_MUTEX)
  trace=None
  if a.trace:
   if not hardware:p.error('--trace needs --read-only or --hardware')

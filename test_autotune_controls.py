@@ -37,4 +37,5 @@ class AutoTuneControlTests(unittest.TestCase):
  def test_stop_abort_exit_saves_current_settings_without_success(self):
   c=Controls();s=self.s(autotune_phase='aborted',autotune_abort_origin='stop');c.request('autotune-exit','exit-1234',s);self.assertEqual(c.take(s),b'*');c.observe(['AUTO:AUTOTUNE ABORTED']);self.assertIsNotNone(c.pending);c.observe(['SAVE USER']);self.assertIsNone(c.pending);self.assertIn('not successful',c.message)
  def test_stuck_stop_exit_times_out_without_retry(self):
-  c=Controls();s=self.s(autotune_phase='aborted',autotune_abort_origin='stop');c.request('autotune-exit','exit-1234',s);c.take(s);c.observe(['AUTO:AUTOTUNE ABORTED']);c.pending['sent']-=6;c.tick();self.assertTrue(c.uncertain);self.assertIsNone(c.take(s))
+  c=Controls();s=self.s(autotune_phase='aborted',autotune_abort_origin='stop');c.request('autotune-exit','exit-1234',s);c.take(s);c.observe(['AUTO:AUTOTUNE ABORTED']);c.pending['sent']-=6;c.tick();self.assertFalse(c.uncertain)   # Exit moves the capacitors: 15 s window
+  c.pending['sent']-=10;c.tick();self.assertTrue(c.uncertain);self.assertIsNone(c.take(s))
