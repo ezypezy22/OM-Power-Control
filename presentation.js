@@ -220,3 +220,13 @@ function swrReadout(s){
  return {text:s.swr.toFixed(1)+':1',color:'rgb('+a.map((v,j)=>Math.round(v+(b[j]-v)*t)).join(', ')+')'};
 }
 if(typeof module!=='undefined')module.exports.swrReadout=swrReadout;
+
+
+// Readiness feedback is relevant only while this tune is waiting for RF.
+// Other command messages, especially uncertain results, retain their priority.
+function controlFeedback(s){
+ const control=s.control||{},message=control.message||'';
+ if(message==='Automatic tuning ready; operator supplies tuning RF'&&s.autotune_phase!=='waiting'&&!control.pending&&!control.uncertain)return '';
+ return message;
+}
+if(typeof module!=='undefined')module.exports.controlFeedback=controlFeedback;
